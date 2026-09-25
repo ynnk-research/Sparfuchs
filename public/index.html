@@ -320,11 +320,15 @@
         <button type="submit" class="btn-add-item">Notieren</button>
       </form>
 
-      <!-- Quick Action Toolbar: Teilen & Leeren -->
+      <!-- Quick Action Toolbar: Teilen, QR-Code & Leeren -->
       <div class="basket-toolbar-row">
         <button type="button" id="shareBasketBtn" class="btn-toolbar-share" title="Einkaufszettel als WhatsApp / Text teilen">
           <span>📤</span>
-          <span>Liste teilen / WhatsApp</span>
+          <span>Teilen</span>
+        </button>
+        <button type="button" id="qrBasketBtn" class="btn-toolbar-qr" title="Einkaufszettel per QR-Code direkt aufs Handy übertragen">
+          <span>📱</span>
+          <span>QR-Code</span>
         </button>
         <button type="button" id="clearBasketBtn" class="btn-toolbar-clear" title="Einkaufszettel leeren">
           <span>🗑️</span>
@@ -510,6 +514,90 @@
     </div>
     <span class="fab-label">Einkaufsliste</span>
   </button>
+
+  <!-- QR-Code Modal (PC ➔ Smartphone Transfer) -->
+  <div id="qrTransferModal" class="modal-backdrop" style="display: none;" aria-hidden="true">
+    <div class="modal-card qr-modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-badge-qr">📱 PC ➔ Smartphone</span>
+          <h3 class="modal-title">Einkauf übertragen</h3>
+        </div>
+        <button type="button" id="closeQrModalBtn" class="btn-modal-close" title="Schließen">✕</button>
+      </div>
+
+      <div class="qr-modal-body">
+        <p class="qr-intro-text">
+          Scanne diesen QR-Code mit der <strong>Kamera deines Handys</strong>. Dein Einkaufszettel öffnet sich sofort – ohne App, ohne Account!
+        </p>
+
+        <div class="qr-code-display-box">
+          <div id="qrCodeSpinner" class="spinner" style="display: none;"></div>
+          <img id="qrCodeImg" class="qr-code-img" src="" alt="SparFuchs Einkaufszettel QR-Code" />
+        </div>
+
+        <div class="qr-meta-bar">
+          <span id="qrItemCountBadge" class="qr-meta-badge">🛒 0 Artikel</span>
+          <span id="qrExpiresText" class="qr-meta-expires">⏱️ 24h gültig</span>
+        </div>
+
+        <!-- Quick Action Buttons im Modal -->
+        <div class="qr-actions-row">
+          <button type="button" id="copyShareLinkBtn" class="btn-qr-action">
+            <span>📋</span>
+            <span id="copyShareLinkText">Link kopieren</span>
+          </button>
+          <a id="openMobileLinkBtn" class="btn-qr-action secondary" href="#" target="_blank" title="Im Browser testen">
+            <span>↗️</span>
+            <span>Link testen</span>
+          </a>
+        </div>
+
+        <!-- Lokaler Host-Hinweis (Dev / Localhost) -->
+        <div id="qrHostSelectorBox" class="qr-host-box" style="display: none;">
+          <span class="qr-host-label">🌐 Ziel-Domain für Smartphone:</span>
+          <div class="qr-host-inputs">
+            <input type="text" id="qrTargetHostInput" placeholder="https://sparfuchs-heo8.onrender.com" />
+            <button type="button" id="updateQrHostBtn">Aktualisieren</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import-Bestätigung auf dem Smartphone -->
+  <div id="importBasketModal" class="modal-backdrop" style="display: none;" aria-hidden="true">
+    <div class="modal-card import-modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-badge-qr">📲 Neuer Einkauf</span>
+          <h3 class="modal-title">Vom PC empfangen</h3>
+        </div>
+        <button type="button" id="closeImportModalBtn" class="btn-modal-close" title="Schließen">✕</button>
+      </div>
+
+      <div class="import-modal-body">
+        <p id="importModalSummary" class="import-summary-text">
+          Es wurden Artikel von deinem PC empfangen.
+        </p>
+
+        <div id="importItemsPreview" class="import-items-preview">
+          <!-- Dynamische Vorschau der empfangenen Artikel -->
+        </div>
+
+        <div class="import-actions-col">
+          <button type="button" id="confirmImportAppendBtn" class="btn-import-primary">
+            <span>➕</span>
+            <span>Zu meiner Liste hinzufügen</span>
+          </button>
+          <button type="button" id="confirmImportReplaceBtn" class="btn-import-secondary">
+            <span>🔄</span>
+            <span>Bestehende Liste ersetzen</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Overlay Backdrop -->
   <div id="drawerBackdrop" class="drawer-backdrop"></div>

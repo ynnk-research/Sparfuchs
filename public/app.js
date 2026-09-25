@@ -31,6 +31,8 @@ const state = {
   householdStats: null,
   offers: [],
   isLoading: false,
+  activeShareUrl: '',
+  incomingSharedBasket: null,
 };
 
 /**
@@ -125,13 +127,33 @@ const elements = {
   radarTitleText: document.getElementById('radarTitleText'),
   radarCardsGrid: document.getElementById('radarCardsGrid'),
   closeRadarBtn: document.getElementById('closeRadarBtn'),
-  // Einkaufsliste Toolbar (Teilen & Leeren)
+  // Einkaufsliste Toolbar (Teilen, QR-Code & Leeren)
   shareBasketBtn: document.getElementById('shareBasketBtn'),
+  qrBasketBtn: document.getElementById('qrBasketBtn'),
   clearBasketBtn: document.getElementById('clearBasketBtn'),
   // Vorrats-Kalkulator / Jahres-Projektion
   kpiAnnualSavings: document.getElementById('kpiAnnualSavings'),
   kpiMonthlySavings: document.getElementById('kpiMonthlySavings'),
   kpiAvgSavingsPerTrip: document.getElementById('kpiAvgSavingsPerTrip'),
+  // QR-Code Transfer & Smartphone Import
+  qrTransferModal: document.getElementById('qrTransferModal'),
+  closeQrModalBtn: document.getElementById('closeQrModalBtn'),
+  qrCodeImg: document.getElementById('qrCodeImg'),
+  qrCodeSpinner: document.getElementById('qrCodeSpinner'),
+  qrItemCountBadge: document.getElementById('qrItemCountBadge'),
+  qrExpiresText: document.getElementById('qrExpiresText'),
+  copyShareLinkBtn: document.getElementById('copyShareLinkBtn'),
+  copyShareLinkText: document.getElementById('copyShareLinkText'),
+  openMobileLinkBtn: document.getElementById('openMobileLinkBtn'),
+  qrHostSelectorBox: document.getElementById('qrHostSelectorBox'),
+  qrTargetHostInput: document.getElementById('qrTargetHostInput'),
+  updateQrHostBtn: document.getElementById('updateQrHostBtn'),
+  importBasketModal: document.getElementById('importBasketModal'),
+  closeImportModalBtn: document.getElementById('closeImportModalBtn'),
+  importModalSummary: document.getElementById('importModalSummary'),
+  importItemsPreview: document.getElementById('importItemsPreview'),
+  confirmImportAppendBtn: document.getElementById('confirmImportAppendBtn'),
+  confirmImportReplaceBtn: document.getElementById('confirmImportReplaceBtn'),
 };
 
 /**
@@ -1031,6 +1053,240 @@ async function shareBasket() {
     document.body.removeChild(ta);
     showToast('📋 In die Zwischenablage kopiert!');
   }
+}
+
+/**
+ * ==========================================================================
+ * QR-Code Übertragung & Smartphone-Import (PC ➔ Handy ohne Account)
+ * ==========================================================================
+ */
+
+/**
+ * Öffnet das QR-Code Modal und fordert einen Share-Code vom Server an
+ */
+async function openQrModal() {
+  if (!state.basket || state.basket.length === 0) {
+    showToast('⚠️ Dein Einkaufszettel ist leer! Füge zuerst Artikel hinzu.');
+    return;
+  }
+
+  if (!elements.qrTransferModal) return;
+  elements.qrTransferModal.style.display = 'flex';
+  elements.qrTransferModal.setAttribute('aria-hidden', 'false');
+
+  if (elements.qrCodeSpinner) elements.qrCodeSpinner.style.display = 'block';
+  if (elements.qrCodeImg) elements.qrCodeImg.style.display = 'none';
+
+  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  if (elements.qrHostSelectorBox) {
+    elements.qrHostSelectorBox.style.display = isLocalhost ? 'block' : 'none';
+  }
+
+  // Ziel-Host bestimmen
+  let targetHost = '';
+  if (elements.qrTargetHostInput && elements.qrTargetHostInput.value.trim()) {
+    targetHost = elements.qrTargetHostInput.value.trim();
+  } else if (isLocalhost) {
+    targetHost = localStorage.getItem('sparfuchs_target_host') || 'https://sparfuchs-heo8.onrender.com';
+    if (elements.qrTargetHostInput) elements.qrTargetHostInput.value = targetHost;
+  }
+
+  const totalUnits = state.basket.reduce((sum, it) => sum + (it.quantity || 1), 0);
+  if (elements.qrItemCountBadge) {
+    elements.qrItemCountBadge.textContent = `🛒 ${totalUnits} Artikel (${state.basket.length} Posten)`;
+  }
+
+  try {
+    const res = await fetch('/api/basket/share', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: state.basket,
+        zipCode: state.zip,
+        targetHost: targetHost || undefined,
+      }),
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const data = await res.json();
+    state.activeShareUrl = data.shareUrl;
+
+    if (elements.qrCodeImg) {
+      elements.qrCodeImg.src = data.qrDataUrl;
+      elements.qrCodeImg.style.display = 'block';
+    }
+    if (elements.openMobileLinkBtn) {
+      elements.openMobileLinkBtn.href = data.shareUrl;
+    }
+  } catch (err) {
+    console.error('Fehler beim Generieren des QR-Codes:', err);
+    showToast('⚠️ QR-Code konnte nicht generiert werden');
+  } finally {
+    if (elements.qrCodeSpinner) elements.qrCodeSpinner.style.display = 'none';
+  }
+}
+
+/**
+ * Schließt das QR-Code Modal
+ */
+function closeQrModal() {
+  if (elements.qrTransferModal) {
+    elements.qrTransferModal.style.display = 'none';
+    elements.qrTransferModal.setAttribute('aria-hidden', 'true');
+  }
+}
+
+/**
+ * Kopiert den generierten Smartphone-Link in die Zwischenablage
+ */
+async function copyShareLink() {
+  if (!state.activeShareUrl) return;
+
+  try {
+    await navigator.clipboard.writeText(state.activeShareUrl);
+    if (elements.copyShareLinkText) {
+      const orig = elements.copyShareLinkText.textContent;
+      elements.copyShareLinkText.textContent = '✅ Link kopiert!';
+      setTimeout(() => {
+        elements.copyShareLinkText.textContent = orig;
+      }, 2000);
+    }
+    showToast('📋 Link kopiert! Kann direkt im mobilen Browser geöffnet werden.');
+  } catch (err) {
+    showToast('⚠️ Link konnte nicht kopiert werden');
+  }
+}
+
+/**
+ * Prüft beim Laden der Seite, ob ein geteilter Warenkorb per URL empfangen wurde
+ */
+async function checkForIncomingBasketShare() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const shareId = urlParams.get('basket_share');
+  if (!shareId) return;
+
+  try {
+    const res = await fetch(`/api/basket/share/${encodeURIComponent(shareId)}`);
+    if (!res.ok) {
+      showToast('⚠️ Der gescannte Einkaufszettel existiert nicht mehr oder ist abgelaufen');
+      return;
+    }
+
+    const data = await res.json();
+    const incomingItems = Array.isArray(data.items) ? data.items : [];
+    if (incomingItems.length === 0) return;
+
+    state.incomingSharedBasket = incomingItems;
+
+    // Wenn der lokale Zettel auf dem Handy noch leer ist: Direkt importieren!
+    if (!state.basket || state.basket.length === 0) {
+      applyImportedBasket('replace');
+      showToast(`🎉 ${incomingItems.length} Artikel vom PC erfolgreich übernommen!`);
+      if (elements.basketDrawer) {
+        elements.basketDrawer.classList.add('open');
+        elements.basketDrawer.setAttribute('aria-hidden', 'false');
+      }
+      if (elements.drawerBackdrop) elements.drawerBackdrop.classList.add('active');
+    } else {
+      // Wenn bereits Artikel vorhanden sind: Nachfragen (Hinzufügen oder Ersetzen)
+      showImportModal(incomingItems);
+    }
+  } catch (err) {
+    console.error('Fehler beim Importieren des Einkaufszettels:', err);
+  } finally {
+    // Bereinige URL, damit Neuladen die Aktion nicht erneut auslöst
+    const cleanUrl = window.location.origin + window.location.pathname;
+    window.history.replaceState({}, document.title, cleanUrl);
+  }
+}
+
+/**
+ * Zeigt das Smartphone-Import Modal mit Vorschau der empfangenen Artikel
+ */
+function showImportModal(items) {
+  if (!elements.importBasketModal) return;
+
+  const totalUnits = items.reduce((sum, it) => sum + (it.quantity || 1), 0);
+  if (elements.importModalSummary) {
+    elements.importModalSummary.innerHTML = `
+      Es wurden <strong>${totalUnits} Artikel</strong> (${items.length} Posten) von deinem PC empfangen.<br>
+      Möchtest du diese zu deiner aktuellen Liste hinzufügen oder die bestehende Liste ersetzen?
+    `;
+  }
+
+  if (elements.importItemsPreview) {
+    elements.importItemsPreview.innerHTML = items.map(it => {
+      const qtyStr = (it.quantity && it.quantity > 1) ? `<strong>${it.quantity}x</strong> ` : '';
+      const priceStr = it.formattedPrice ? ` – ${it.formattedPrice}` : '';
+      return `
+        <div class="import-preview-item">
+          <span class="import-preview-title">${qtyStr}${it.title}</span>
+          <span class="import-preview-meta">${it.retailer || 'Supermarkt'}${priceStr}</span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  elements.importBasketModal.style.display = 'flex';
+  elements.importBasketModal.setAttribute('aria-hidden', 'false');
+}
+
+/**
+ * Schließt das Smartphone-Import Modal
+ */
+function closeImportModal() {
+  if (elements.importBasketModal) {
+    elements.importBasketModal.style.display = 'none';
+    elements.importBasketModal.setAttribute('aria-hidden', 'true');
+  }
+  state.incomingSharedBasket = null;
+}
+
+/**
+ * Wendet die empfangenen Artikel an ('replace' oder 'append')
+ */
+function applyImportedBasket(mode) {
+  if (!state.incomingSharedBasket || state.incomingSharedBasket.length === 0) {
+    closeImportModal();
+    return;
+  }
+
+  if (mode === 'replace') {
+    state.basket = state.incomingSharedBasket.map(it => ({
+      ...it,
+      quantity: (typeof it.quantity === 'number' && it.quantity > 0) ? it.quantity : 1,
+      checked: false,
+    }));
+  } else {
+    // 'append' / 'merge'
+    state.incomingSharedBasket.forEach(incoming => {
+      const qty = (typeof incoming.quantity === 'number' && incoming.quantity > 0) ? incoming.quantity : 1;
+      const idx = state.basket.findIndex(b => b.id === incoming.id || (b.title === incoming.title && b.retailer === incoming.retailer));
+      if (idx !== -1) {
+        state.basket[idx].quantity = (state.basket[idx].quantity || 1) + qty;
+      } else {
+        state.basket.push({
+          ...incoming,
+          quantity: qty,
+          checked: false,
+        });
+      }
+    });
+  }
+
+  saveBasket();
+  renderBasket();
+  closeImportModal();
+
+  // Öffne den Warenkorb-Drawer zur Bestätigung
+  if (elements.basketDrawer) {
+    elements.basketDrawer.classList.add('open');
+    elements.basketDrawer.setAttribute('aria-hidden', 'false');
+  }
+  if (elements.drawerBackdrop) elements.drawerBackdrop.classList.add('active');
+
+  showToast('🎉 Einkaufszettel erfolgreich übertragen & geladen!');
 }
 
 /**
@@ -2008,9 +2264,13 @@ function initEvents() {
 
   elements.drawerBackdrop.addEventListener('click', closeAllDrawers);
 
-  // ESC-Taste schließt geöffnete Drawer
+  // ESC-Taste schließt geöffnete Drawer & Modals
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeAllDrawers();
+    if (e.key === 'Escape') {
+      closeAllDrawers();
+      closeQrModal();
+      closeImportModal();
+    }
   });
 
   // Basket Manual Item Add Form
@@ -2027,12 +2287,42 @@ function initEvents() {
   // Optimize Button
   elements.optimizeBasketBtn.addEventListener('click', optimizeBasket);
 
-  // Einkaufsliste Quick Actions: Teilen (WhatsApp) & Leeren
+  // Einkaufsliste Quick Actions: Teilen, QR-Code & Leeren
   if (elements.shareBasketBtn) {
     elements.shareBasketBtn.addEventListener('click', shareBasket);
   }
+  if (elements.qrBasketBtn) {
+    elements.qrBasketBtn.addEventListener('click', openQrModal);
+  }
   if (elements.clearBasketBtn) {
     elements.clearBasketBtn.addEventListener('click', clearAllBasket);
+  }
+
+  // QR-Code Modal Buttons
+  if (elements.closeQrModalBtn) {
+    elements.closeQrModalBtn.addEventListener('click', closeQrModal);
+  }
+  if (elements.copyShareLinkBtn) {
+    elements.copyShareLinkBtn.addEventListener('click', copyShareLink);
+  }
+  if (elements.updateQrHostBtn) {
+    elements.updateQrHostBtn.addEventListener('click', () => {
+      if (elements.qrTargetHostInput && elements.qrTargetHostInput.value.trim()) {
+        localStorage.setItem('sparfuchs_target_host', elements.qrTargetHostInput.value.trim());
+        openQrModal();
+      }
+    });
+  }
+
+  // Smartphone Import Modal Buttons
+  if (elements.closeImportModalBtn) {
+    elements.closeImportModalBtn.addEventListener('click', closeImportModal);
+  }
+  if (elements.confirmImportAppendBtn) {
+    elements.confirmImportAppendBtn.addEventListener('click', () => applyImportedBasket('append'));
+  }
+  if (elements.confirmImportReplaceBtn) {
+    elements.confirmImportReplaceBtn.addEventListener('click', () => applyImportedBasket('replace'));
   }
 
   // Favoriten-Radar Schließen-Button
@@ -2068,5 +2358,6 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchAndRenderHistory();
   loadCategories();
   fetchOffers();
+  checkForIncomingBasketShare();
 });
 
