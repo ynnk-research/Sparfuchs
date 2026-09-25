@@ -1,0 +1,25 @@
+{
+  "name": "supermarkt-sparer",
+  "version": "1.0.0",
+  "description": "Supermarkt-übergreifender Angebotsfinder und Einkaufslisten-Optimierer für Deutschland",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "test": "node --test test/**/*.test.js",
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": [
+    "supermarkt",
+    "angebote",
+    "preisvergleich",
+    "grundpreis",
+    "einkaufen",
+    "marktguru"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

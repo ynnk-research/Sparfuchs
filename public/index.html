@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SparFuchs – Dein Supermarkt- & Grundpreis-Vergleich</title>
+  <meta name="description" content="Finde echte Supermarkt-Schnäppchen in deiner Nähe. Vergleiche Angebote von Lidl, Aldi Nord, Rewe, Kaufland & Co. sortiert nach Grundpreis und optimiere deine Einkaufsliste.">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="manifest" href="manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="dark-theme">
+  <!-- Top Navigation -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="brand-group">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="9" cy="21" r="1"></circle>
+            <circle cx="20" cy="21" r="1"></circle>
+            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+          </svg>
+        </div>
+        <div>
+          <span class="brand-name">Spar<span class="gradient-text">Fuchs</span></span>
+          <span class="brand-badge">DE-Supermarkt-Vergleich</span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- PLZ Selector -->
+        <div class="plz-wrapper" title="Postleitzahl für lokale Prospekte">
+          <svg class="icon-location" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+            <circle cx="12" cy="10" r="3"></circle>
+          </svg>
+          <input type="text" id="plzInput" maxlength="5" pattern="[0-9]{5}" value="10115" placeholder="PLZ">
+          <button id="plzUpdateBtn" class="btn-icon" title="PLZ aktualisieren">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Favoriten Button -->
+        <button id="favQuickBtn" class="btn-icon-labeled" title="Favoriten-Filter aktivieren">
+          <span class="star-icon">⭐</span>
+          <span class="fav-count-badge" id="favCountBadge">0</span>
+        </button>
+
+        <!-- Haushaltsbuch & Historie Button -->
+        <button id="openHistoryBtn" class="btn-icon-labeled" title="Haushaltsplan & Einkaufs-Historie">
+          <span class="history-icon">📊</span>
+          <span class="history-label">Haushaltsplan</span>
+          <span id="historyCountBadge" class="fav-count-badge" style="display:none;">0</span>
+        </button>
+
+        <!-- Einkaufslisten Button -->
+        <button id="openBasketBtn" class="btn-basket" aria-label="Einkaufsliste öffnen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <path d="M16 10a4 4 0 0 1-8 0"></path>
+          </svg>
+          <span class="basket-label">Einkaufsliste</span>
+          <span id="basketCountBadge" class="basket-badge">0</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="main-container">
+    <!-- Hero / Search Section -->
+    <section class="hero-section">
+      <div class="hero-content">
+        <h1 class="hero-title">
+          Echte Schnäppchen finden. <br>
+          <span class="gradient-text">Nach Grundpreis verglichen & sortiert.</span>
+        </h1>
+        <p class="hero-subtitle">
+          Schluss mit Packungs-Tricks. Vergleiche Angebote von Lidl, Aldi Nord, Rewe, Kaufland & Co. immer pro kg oder Liter.
+        </p>
+
+        <!-- Search Bar -->
+        <form id="searchForm" class="search-form">
+          <div class="search-box">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input 
+              type="text" 
+              id="searchInput" 
+              placeholder="Was suchst du? (z.B. Butter, Kaffee, Bier, Haferflocken, Kerrygold, Werkzeug...)" 
+              autocomplete="off"
+              required
+            >
+            <button type="button" id="clearSearchBtn" class="btn-clear" title="Eingabe leeren" style="display:none;">✕</button>
+            <button type="submit" id="searchSubmitBtn" class="btn-search">
+              <span>Suchen</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+              </svg>
+            </button>
+          </div>
+        </form>
+
+        <!-- Quick Tags -->
+        <div class="quick-tags" id="quickTagsContainer">
+          <span class="quick-tags-label">Schnellsuche:</span>
+          <button class="tag-btn tag-btn-highlight" id="allOffersTag">🌟 Alle Angebote</button>
+          <button class="tag-btn" data-query="Butter">Butter</button>
+          <button class="tag-btn" data-query="Kaffee">Kaffee</button>
+          <button class="tag-btn" data-query="Milch">Milch</button>
+          <button class="tag-btn" data-query="Bier">Bier</button>
+          <button class="tag-btn" data-query="Käse">Käse</button>
+          <button class="tag-btn" data-query="Schokolade">Schokolade</button>
+          <button class="tag-btn" data-query="Olivenöl">Olivenöl</button>
+          <button class="tag-btn tag-btn-special" id="favoritesSearchTag">⭐ Meine Favoriten</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Categories Strip -->
+    <section class="categories-section">
+      <div class="categories-scroll" id="categoryChips">
+        <!-- Rendered via JavaScript -->
+      </div>
+    </section>
+
+    <!-- Controls Bar (Filter, Sort, Views) -->
+    <section class="controls-section">
+      <div class="controls-container">
+        <!-- Sort Control -->
+        <div class="control-group">
+          <label for="sortBySelect" class="control-label">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 6h18M6 12h12M10 18h4"></path>
+            </svg>
+            Sortierung:
+          </label>
+          <select id="sortBySelect" class="control-select">
+            <option value="refPrice" selected>🏆 Grundpreis (€/kg, €/l) - Empfohlen</option>
+            <option value="price">💶 Ladenpreis (€ aufsteigend)</option>
+            <option value="discount">🔥 Höchster Rabatt (%)</option>
+            <option value="validTo">⏰ Gültigkeit (Endet bald)</option>
+            <option value="title">🔤 Produktname A–Z</option>
+          </select>
+        </div>
+
+        <!-- Special Filter Tag Buttons -->
+        <div class="special-tags-group">
+          <button id="toggleFoodFilterBtn" class="filter-chip-toggle" data-filter="food">
+            <span class="chip-icon">🍎</span> Nur Lebensmittel
+          </button>
+          <button id="toggleBioFilterBtn" class="filter-chip-toggle" data-filter="bio">
+            <span class="chip-icon">🌱</span> Nur Bio
+          </button>
+          <button id="toggleNonFoodFilterBtn" class="filter-chip-toggle" data-filter="nonfood">
+            <span class="chip-icon">📦</span> Nicht-Lebensmittel
+          </button>
+          <button id="toggleFavFilterBtn" class="filter-chip-toggle" data-filter="favorites">
+            <span class="chip-icon">⭐</span> Nur Favoriten
+          </button>
+        </div>
+
+        <!-- Filter Toggles -->
+        <div class="toggles-group">
+          <label class="toggle-control" title="Schließt Angebote aus, die nur mit Lidl Plus, Rewe App etc. gelten">
+            <input type="checkbox" id="excludeAppOnlyToggle">
+            <span class="toggle-slider"></span>
+            <span class="toggle-text">Kein App-Zwang</span>
+          </label>
+
+          <label class="toggle-control" title="Nur Angebote anzeigen, die ab heute gültig sind">
+            <input type="checkbox" id="validNowOnlyToggle" checked>
+            <span class="toggle-slider"></span>
+            <span class="toggle-text">Nur aktuell gültig</span>
+          </label>
+        </div>
+
+        <!-- View Switcher -->
+        <div class="view-switcher" role="group" aria-label="Ansicht umschalten">
+          <button id="viewGridBtn" class="btn-view active" title="Kartenansicht">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="7" height="7"></rect>
+              <rect x="14" y="3" width="7" height="7"></rect>
+              <rect x="14" y="14" width="7" height="7"></rect>
+              <rect x="3" y="14" width="7" height="7"></rect>
+            </svg>
+          </button>
+          <button id="viewTableBtn" class="btn-view" title="Kompakte Vergleichstabelle">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Retailer Filters Bar -->
+      <div class="retailer-bar">
+        <span class="retailer-bar-label">Märkte:</span>
+        <div class="retailer-chips" id="retailerChipsContainer">
+          <button class="chip-retailer active" data-retailer="all">Alle Märkte</button>
+          <button class="chip-retailer" data-retailer="Aldi Nord">Aldi Nord</button>
+          <button class="chip-retailer" data-retailer="Lidl">Lidl</button>
+          <button class="chip-retailer" data-retailer="REWE">REWE</button>
+          <button class="chip-retailer" data-retailer="Norma">Norma</button>
+          <button class="chip-retailer" data-retailer="Kaufland">Kaufland</button>
+          <button class="chip-retailer" data-retailer="Edeka">Edeka</button>
+          <button class="chip-retailer" data-retailer="Penny">Penny</button>
+          <button class="chip-retailer" data-retailer="Netto">Netto</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Results Section -->
+    <section class="results-section">
+      <!-- Status & Feedback -->
+      <div class="results-header" id="resultsHeader">
+        <div class="results-title-group">
+          <h2 id="resultsTitle" class="results-title">Aktuelle Angebote</h2>
+          <div class="active-tag-pills" id="activeTagPills"></div>
+        </div>
+        <div id="resultsCount" class="results-count"></div>
+      </div>
+
+      <!-- Loading Spinner -->
+      <div id="loadingSpinner" class="loading-state" style="display: none;">
+        <div class="spinner"></div>
+        <p>Lade Supermarkt- & Aldi Nord-Angebote...</p>
+      </div>
+
+      <!-- Empty State -->
+      <div id="emptyState" class="empty-state" style="display: none;">
+        <div class="empty-icon">🔍</div>
+        <h3>Keine Angebote gefunden</h3>
+        <p id="emptyStateText">Probiere einen anderen Suchbegriff oder passe deine Filter an.</p>
+      </div>
+
+      <!-- Grid Cards View -->
+      <div id="offersGrid" class="offers-grid">
+        <!-- Rendered via JavaScript -->
+      </div>
+
+      <!-- Table View -->
+      <div id="offersTableContainer" class="table-container" style="display: none;">
+        <table class="offers-table">
+          <thead>
+            <tr>
+              <th>Favorit</th>
+              <th>Produkt</th>
+              <th>Händler</th>
+              <th>Ladenpreis</th>
+              <th class="th-highlight">Grundpreis</th>
+              <th>Tags</th>
+              <th>Gültig bis</th>
+              <th>Aktion</th>
+            </tr>
+          </thead>
+          <tbody id="offersTableBody">
+            <!-- Rendered via JavaScript -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Slide-Over Shopping Basket Drawer (Gruppiert nach Supermarkt) -->
+  <aside id="basketDrawer" class="basket-drawer" aria-hidden="true">
+    <div class="drawer-header">
+      <div class="drawer-title-group">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+        </svg>
+        <div>
+          <h3>Mein Einkaufszettel</h3>
+          <span class="drawer-subtitle">Übersichtlich nach Supermarkt sortiert</span>
+        </div>
+      </div>
+      <button id="closeBasketBtn" class="btn-close" aria-label="Schließen">✕</button>
+    </div>
+
+    <div class="drawer-body">
+      <!-- Quick Add Input -->
+      <form id="basketAddForm" class="basket-add-form">
+        <input 
+          type="text" 
+          id="basketItemInput" 
+          placeholder="Artikel notieren (z.B. Butter, Haferflocken...)"
+          autocomplete="off"
+        >
+        <button type="submit" class="btn-add-item">Notieren</button>
+      </form>
+
+      <!-- Store-Grouped Items Container -->
+      <div id="basketGroupedContainer" class="basket-grouped-container">
+        <!-- Rendered via JavaScript -->
+      </div>
+
+      <!-- Total Price & Savings Bar -->
+      <div id="basketTotalBar" class="basket-total-bar" style="display: none;">
+        <div class="total-row">
+          <span>Gesamtpreis:</span>
+          <strong id="basketGrandTotal">0,00 €</strong>
+        </div>
+        <div class="savings-row" id="basketSavingsRow" style="display: none;">
+          <div class="savings-label-group">
+            <span class="icon-savings">🎉</span>
+            <span>Deine Ersparnis:</span>
+          </div>
+          <div class="savings-value-group">
+            <strong id="basketTotalSavings" class="savings-amount">-0,00 €</strong>
+            <span id="basketSavingsPercentBadge" class="savings-percent-pill">-0%</span>
+          </div>
+        </div>
+        <div id="basketSavingsNote" class="savings-note">
+          * Ersparnis berechnet aus offiziellen Streichpreisen und aktuellen Marktvergleichen.
+        </div>
+
+        <!-- Einkauf abschließen & verbuchen Button -->
+        <button id="bookBasketBtn" class="btn-book-basket" title="Einkauf jetzt verbindlich verbuchen und in die Haushalts-Historie aufnehmen">
+          <span class="btn-book-icon">✅</span>
+          <span class="btn-book-text">Einkauf abschließen & verbuchen</span>
+        </button>
+      </div>
+
+      <!-- Optimization Trigger Box -->
+      <div class="basket-optimize-box">
+        <div class="optimize-info">
+          <span>Smarte Analyse für PLZ <strong id="basketPlzDisplay">10115</strong></span>
+        </div>
+        <button id="optimizeBasketBtn" class="btn-optimize">
+          <span class="icon-sparkle">⚡</span>
+          <span>Einkauf jetzt optimieren</span>
+        </button>
+      </div>
+
+      <!-- Optimization Results Container -->
+      <div id="optimizationResultContainer" class="optimization-result-box" style="display: none;">
+        <!-- Rendered via JavaScript -->
+      </div>
+    </div>
+  </aside>
+
+  <!-- Slide-Over Haushaltsplan & Historie Drawer -->
+  <aside id="historyDrawer" class="history-drawer" aria-hidden="true">
+    <div class="drawer-header">
+      <div class="drawer-title-group">
+        <span style="font-size: 1.4rem;">📊</span>
+        <div>
+          <h3>Haushaltsplan & Historie</h3>
+          <span class="drawer-subtitle">Verbuchte Einkäufe & Langzeit-Ersparnisse</span>
+        </div>
+      </div>
+      <button id="closeHistoryBtn" class="btn-close" aria-label="Schließen">✕</button>
+    </div>
+
+    <div class="drawer-body history-body">
+      <!-- KPI Stats Grid -->
+      <div class="stats-kpi-grid">
+        <div class="kpi-card highlight-savings">
+          <span class="kpi-label">Gesamtersparnis</span>
+          <div class="kpi-value-row">
+            <span id="kpiTotalSavings" class="kpi-value">0,00 €</span>
+            <span id="kpiSavingsPct" class="kpi-badge">0%</span>
+          </div>
+          <span class="kpi-subtext">über alle verbuchten Einkäufe</span>
+        </div>
+
+        <div class="kpi-card">
+          <span class="kpi-label">Gesamtausgaben</span>
+          <span id="kpiTotalSpent" class="kpi-value">0,00 €</span>
+          <span id="kpiTotalRegular" class="kpi-subtext">statt 0,00 € regulär</span>
+        </div>
+
+        <div class="kpi-card">
+          <span class="kpi-label">Ø Ausgaben / Einkauf</span>
+          <span id="kpiAvgSpent" class="kpi-value">0,00 €</span>
+          <span id="kpiAvgSavings" class="kpi-subtext">Ø 0,00 € gespart</span>
+        </div>
+
+        <div class="kpi-card">
+          <span class="kpi-label">Verbuchte Einkäufe</span>
+          <span id="kpiReceiptCount" class="kpi-value">0</span>
+          <span id="kpiItemCount" class="kpi-subtext">0 Artikel gekauft</span>
+        </div>
+      </div>
+
+      <!-- Store Savings Ranking (Top-Sparmärkte) -->
+      <div class="history-section-box">
+        <h4 class="history-section-title">
+          <span>🏪</span> Top-Sparmärkte (Wo sparst du am meisten?)
+        </h4>
+        <div id="historyStoreBarsContainer" class="history-store-bars">
+          <!-- Rendered via JavaScript -->
+        </div>
+      </div>
+
+      <!-- Monthly Trend (Haushaltsentwicklung) -->
+      <div class="history-section-box">
+        <h4 class="history-section-title">
+          <span>📅</span> Monatsverlauf
+        </h4>
+        <div id="historyMonthlyContainer" class="history-monthly-list">
+          <!-- Rendered via JavaScript -->
+        </div>
+      </div>
+
+      <!-- Receipts History List (Chronologische Einkaufsliste) -->
+      <div class="history-section-box">
+        <div class="history-header-row">
+          <h4 class="history-section-title">
+            <span>🧾</span> Verbuchte Einkäufe
+          </h4>
+          <button id="clearHistoryBtn" class="btn-text-danger" title="Gesamte Historie zurücksetzen">Historie leeren</button>
+        </div>
+        <div id="receiptsListContainer" class="receipts-list">
+          <!-- Rendered via JavaScript -->
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Overlay Backdrop -->
+  <div id="drawerBackdrop" class="drawer-backdrop"></div>
+
+  <!-- Notification Toast -->
+  <div id="toast" class="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
