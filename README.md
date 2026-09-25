@@ -29,15 +29,21 @@ Ein modernes, hocheffizientes Open-Source-Tool für preisbewusstes Einkaufen in 
 - **Supermarkt-Gruppierung:** Übersichtliche Aufteilung der Artikel nach Filiale für den schnellen Rundgang im Geschäft.
 - **One-Tap Checkboxen:** Artikel direkt im Supermarkt beim Durchlaufen der Regale mit einem Fingertipp abhaken.
 
-### 5. 📤 1-Klick Einkaufsliste Teilen (WhatsApp & Messenger)
+### 5. 📲 Nahtlose QR-Code Übertragung (PC ➔ Smartphone)
+- **Zero Friction:** Am PC gemütlich die Angebote durchstöbern und den Einkaufszettel zusammenstellen.
+- **1-Klick QR-Code:** Ein Klick auf **„📱 QR-Code“** im Warenkorb generiert einen scanbaren Code auf dem Monitor.
+- **Sofortiger Import:** Einfach mit der Kamera des Smartphones scannen – die Einkaufsliste öffnet sich direkt auf dem Handy. Kein Account, keine App-Installation, keine Messenger-Nachrichten nötig!
+- **Intelligente Synchronisation:** Auf dem Smartphone kann gewählt werden, ob übertragene Artikel zu einer bestehenden Liste hinzugefügt oder diese ersetzt werden soll.
+
+### 6. 📤 1-Klick Einkaufsliste Teilen (WhatsApp & Messenger)
 - **Web Share API Integration:** Auf Smartphones öffnet ein Klick direkt das native Teilen-Menü (WhatsApp, Telegram, Signal, Apple Notizen). Am Desktop wird der Text sauber in die Zwischenablage kopiert.
 - **Strukturierter Format-Export:** Gruppiert nach Märkten, mit Kontrollkästchen (◻️/☑️), Stückzahlen, Einzelpreisen und Gesamtersparnis.
 
-### 6. 🧠 Multimarkt-Einkaufsoptimierer (Single-Store vs. Smart-Split)
+### 7. 🧠 Multimarkt-Einkaufsoptimierer (Single-Store vs. Smart-Split)
 - **Single-Store Champion:** Ermittelt den Supermarkt, der den günstigsten Gesamtpreis für deine gesamte Wunschliste bietet (wenn du nur in einen Laden möchtest).
 - **Smart Split (2 Läden):** Berechnet die mathematisch beste Aufteilung auf zwei Geschäfte und zeigt dir exakt, wie viel Geld du durch den zweiten Stop sparst.
 
-### 7. 📊 Haushaltsbuch, Beleg-Historie & Vorrats-Kalkulator
+### 8. 📊 Haushaltsbuch, Beleg-Historie & Vorrats-Kalkulator
 - **Einkauf verbuchen:** Verbuchte Einkaufszettel werden dauerhaft als digitale Belege archiviert.
 - **Haushalts-Dashboard:**
   - Kumulierte Gesamtersparnis und Durchschnitts-Sparquote in Prozent.
@@ -45,11 +51,11 @@ Ein modernes, hocheffizientes Open-Source-Tool für preisbewusstes Einkaufen in 
   - **Monatsverlauf:** Historische Haushaltsentwicklung und Ausgabenübersicht.
   - **Vorrats-Kalkulator (Jahres-Projektion):** Empirische Hochrechnung der Jahresersparnis ($\varnothing\text{ Ersparnis je Einkauf} \times 52\text{ Wochen}$) und monatlichen Budgetentlastung.
 
-### 8. 🏷️ Echte Warengruppen & semantische Filter
+### 9. 🏷️ Echte Warengruppen & semantische Filter
 - **8 vordefinierte Kategorien:** *Molkerei & Eier, Obst & Gemüse, Fleisch & Fisch, Kaffee & Getränke, Vorrat & Grundnahrung, Süßes & Snacks, Drogerie & Haushalt, Aktionsware*.
 - **Spezialfilter:** *Nur Lebensmittel*, *🌱 Bio-Produkte* (Gut Bio, K-Bio, Alnatura etc.), *📦 Non-Food* und *Kein App-Zwang* (schließt Angebote aus, die Kundenkarten-Apps wie Lidl Plus erfordern).
 
-### 9. 📱 Mobile-First Glassmorphic Design
+### 10. 📱 Mobile-First Glassmorphic Design
 - Ausgelegt für mobile Nutzung direkt im Supermarkt: Schwebender Floating Action Button (FAB) für schnellen Zugriff auf den Einkaufszettel, intuitive Drawer-Navigation und haptisch optimierte Touch-Targets ($\ge 44$px).
 
 ---
@@ -84,13 +90,14 @@ npm run dev
 
 ## 🧪 Automatisierte Testsuite
 
-Das Projekt nutzt den nativen, schnellen Test-Runner von Node.js (`node --test`). Es sind **42 Unit- und End-to-End-Tests** implementiert:
+Das Projekt nutzt den nativen, schnellen Test-Runner von Node.js (`node --test`). Es sind **46 Unit- und End-to-End-Tests** implementiert:
 
 ```bash
 npm test
 ```
 
 ### Test-Abdeckung nach Modulen:
+* **`test/qr_share.test.js`**: Erstellung und Abruf von QR-Code Shares, Verifizierung der Data-URLs und Endpunkte.
 * **`test/history.test.js`**: Haushaltsbuch-KPIs, Monatsaggregation, Supermarkt-Ranking, Spin-Down-Sync und Vorrats-Jahresprojektion.
 * **`test/comparator.test.js`**: Grundpreis-Standardisierung, Gültigkeitsprüfung, Händler-, Bio- und App-Zwang-Filter.
 * **`test/categories.test.js`**: Automatische Erkennung und Klassifizierung von Angeboten in Warengruppen.
@@ -134,7 +141,7 @@ j:/Einkaufen/
 │   │   ├── history.js            # Haushaltsbuch, KPIs & Jahresersparnis-Projektion
 │   │   └── optimizer.js          # Single-Store & Smart-Split-Algorithmus
 │   └── server.js                 # Express REST-API Server & Endpunkte
-├── test/                         # 42 Automatisierte Unit- & E2E-Tests
+├── test/                         # 46 Automatisierte Unit- & E2E-Tests
 │   ├── aldinord.test.js
 │   ├── cache.test.js
 │   ├── categories.test.js
@@ -146,6 +153,7 @@ j:/Einkaufen/
 │   ├── norma.test.js
 │   ├── optimizer.test.js
 │   ├── pricing_sanitization.test.js
+│   ├── qr_share.test.js
 │   ├── savings.test.js
 │   └── server.test.js
 ├── package.json
