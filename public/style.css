@@ -2629,6 +2629,48 @@ input, select {
   border-color: #38bdf8;
 }
 
+.btn-header-qr {
+  border-color: rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.btn-header-qr:hover {
+  background: #38bdf8;
+  color: #051410;
+  border-color: #38bdf8;
+}
+
+.btn-basket-qr-prominent {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  width: 100%;
+  margin-top: 0.75rem;
+  margin-bottom: 0.5rem;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(0, 229, 153, 0.18));
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  color: #38bdf8;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-sm);
+  font-weight: 800;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-basket-qr-prominent:hover,
+.btn-basket-qr-prominent:active {
+  background: #38bdf8;
+  color: #051410;
+  border-color: #38bdf8;
+  transform: translateY(-1px);
+}
+
 /* Modals (QR-Code Transfer & Smartphone Import) */
 .modal-backdrop {
   position: fixed;

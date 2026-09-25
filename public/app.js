@@ -128,8 +128,10 @@ const elements = {
   radarCardsGrid: document.getElementById('radarCardsGrid'),
   closeRadarBtn: document.getElementById('closeRadarBtn'),
   // Einkaufsliste Toolbar (Teilen, QR-Code & Leeren)
+  headerQrBtn: document.getElementById('headerQrBtn'),
   shareBasketBtn: document.getElementById('shareBasketBtn'),
   qrBasketBtn: document.getElementById('qrBasketBtn'),
+  basketBottomQrBtn: document.getElementById('basketBottomQrBtn'),
   clearBasketBtn: document.getElementById('clearBasketBtn'),
   // Vorrats-Kalkulator / Jahres-Projektion
   kpiAnnualSavings: document.getElementById('kpiAnnualSavings'),
@@ -2288,11 +2290,28 @@ function initEvents() {
   elements.optimizeBasketBtn.addEventListener('click', optimizeBasket);
 
   // Einkaufsliste Quick Actions: Teilen, QR-Code & Leeren
+  if (elements.headerQrBtn) {
+    elements.headerQrBtn.addEventListener('click', () => {
+      if (!state.basket || state.basket.length === 0) {
+        if (elements.basketDrawer) {
+          elements.basketDrawer.classList.add('open');
+          elements.basketDrawer.setAttribute('aria-hidden', 'false');
+        }
+        if (elements.drawerBackdrop) elements.drawerBackdrop.classList.add('active');
+        showToast('🛒 Notiere zuerst Angebote auf deiner Einkaufsliste!');
+      } else {
+        openQrModal();
+      }
+    });
+  }
   if (elements.shareBasketBtn) {
     elements.shareBasketBtn.addEventListener('click', shareBasket);
   }
   if (elements.qrBasketBtn) {
     elements.qrBasketBtn.addEventListener('click', openQrModal);
+  }
+  if (elements.basketBottomQrBtn) {
+    elements.basketBottomQrBtn.addEventListener('click', openQrModal);
   }
   if (elements.clearBasketBtn) {
     elements.clearBasketBtn.addEventListener('click', clearAllBasket);

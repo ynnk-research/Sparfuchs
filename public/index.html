@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=2.2">
 </head>
 <body class="dark-theme">
   <!-- Top Navigation -->
@@ -59,6 +59,12 @@
           <span class="history-icon">📊</span>
           <span class="history-label">Haushaltsplan</span>
           <span id="historyCountBadge" class="fav-count-badge" style="display:none;">0</span>
+        </button>
+
+        <!-- QR-Code Handy-Transfer Button im Header -->
+        <button id="headerQrBtn" class="btn-icon-labeled btn-header-qr" title="Einkaufszettel per QR-Code aufs Smartphone übertragen">
+          <span class="qr-header-icon">📱</span>
+          <span class="qr-header-label">Aufs Handy</span>
         </button>
 
         <!-- Einkaufslisten Button -->
@@ -361,6 +367,12 @@
           * Ersparnis berechnet aus offiziellen Streichpreisen und aktuellen Marktvergleichen.
         </div>
 
+        <!-- Prominenter QR-Transfer Button im Warenkorb -->
+        <button type="button" id="basketBottomQrBtn" class="btn-basket-qr-prominent" title="Einkaufszettel per QR-Code aufs Smartphone übertragen">
+          <span style="font-size: 1.15rem;">📱</span>
+          <span>Aufs Smartphone übertragen (QR-Code)</span>
+        </button>
+
         <!-- Einkauf abschließen & verbuchen Button -->
         <button id="bookBasketBtn" class="btn-book-basket" title="Einkauf jetzt verbindlich verbuchen und in die Haushalts-Historie aufnehmen">
           <span class="btn-book-icon">✅</span>
@@ -605,6 +617,6 @@
   <!-- Notification Toast -->
   <div id="toast" class="toast"></div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=2.2"></script>
 </body>
 </html>
