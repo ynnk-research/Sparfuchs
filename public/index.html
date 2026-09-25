@@ -225,6 +225,20 @@
 
     <!-- Results Section -->
     <section class="results-section">
+      <!-- Favoriten-Radar / Deal-Alarm Banner (Prosumer-Feature) -->
+      <div id="favoritesRadarContainer" class="favorites-radar-container" style="display: none;">
+        <div class="radar-header">
+          <div class="radar-title-group">
+            <span class="radar-badge-pulse">🔥 Deal-Alarm</span>
+            <span id="radarTitleText" class="radar-title">Deine Favoriten im Wochenangebot!</span>
+          </div>
+          <button type="button" id="closeRadarBtn" class="radar-close-btn" title="Ausblenden">✕</button>
+        </div>
+        <div id="radarCardsGrid" class="radar-cards-grid">
+          <!-- Rendered via JavaScript -->
+        </div>
+      </div>
+
       <!-- Status & Feedback -->
       <div class="results-header" id="resultsHeader">
         <div class="results-title-group">
@@ -305,6 +319,18 @@
         >
         <button type="submit" class="btn-add-item">Notieren</button>
       </form>
+
+      <!-- Quick Action Toolbar: Teilen & Leeren -->
+      <div class="basket-toolbar-row">
+        <button type="button" id="shareBasketBtn" class="btn-toolbar-share" title="Einkaufszettel als WhatsApp / Text teilen">
+          <span>📤</span>
+          <span>Liste teilen / WhatsApp</span>
+        </button>
+        <button type="button" id="clearBasketBtn" class="btn-toolbar-clear" title="Einkaufszettel leeren">
+          <span>🗑️</span>
+          <span>Leeren</span>
+        </button>
+      </div>
 
       <!-- Store-Grouped Items Container -->
       <div id="basketGroupedContainer" class="basket-grouped-container">
@@ -406,6 +432,30 @@
           <span id="kpiReceiptCount" class="kpi-value">0</span>
           <span id="kpiItemCount" class="kpi-subtext">0 Artikel gekauft</span>
         </div>
+      </div>
+
+      <!-- Vorrats- & Sparpotenzial-Projektion (Prosumer-Feature) -->
+      <div class="annual-savings-card">
+        <div class="annual-savings-header">
+          <div class="annual-icon">📈</div>
+          <div>
+            <span class="annual-tag">Vorrats- & Haushalts-Kalkulator</span>
+            <h4 class="annual-title">Ersparnis-Projektion auf 1 Jahr</h4>
+          </div>
+        </div>
+        <div class="annual-metrics-row">
+          <div class="annual-metric">
+            <span class="annual-metric-label">Hochgerechnete Jahresersparnis:</span>
+            <strong id="kpiAnnualSavings" class="annual-metric-val">~0,00 €</strong>
+          </div>
+          <div class="annual-metric">
+            <span class="annual-metric-label">Monatliche Entlastung:</span>
+            <strong id="kpiMonthlySavings" class="annual-metric-val">~0,00 €</strong>
+          </div>
+        </div>
+        <p class="annual-hint">
+          * Basierend auf deinem Durchschnitt von <strong id="kpiAvgSavingsPerTrip">0,00 €</strong> Ersparnis je Einkauf (bei 1 Wocheneinkauf = 52 Wochen).
+        </p>
       </div>
 
       <!-- Store Savings Ranking (Top-Sparmärkte) -->

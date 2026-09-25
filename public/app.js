@@ -18,10 +18,14 @@ const state = {
   viewMode: 'grid', // 'grid' | 'table'
   category: 'all',
   availableCategories: [],
-  // Basket stores items with retailer & price: [{ id, title, retailer, price, formattedPrice, checked }]
-  basket: JSON.parse(localStorage.getItem('sparfuchs_basket_v2') || '[]'),
+  // Basket stores items with retailer, price & quantity: [{ id, title, retailer, price, formattedPrice, quantity, checked }]
+  basket: (JSON.parse(localStorage.getItem('sparfuchs_basket_v2') || '[]')).map(item => ({
+    ...item,
+    quantity: (typeof item.quantity === 'number' && item.quantity > 0) ? item.quantity : 1,
+  })),
   // Favorites store array of strings / keywords
   favorites: JSON.parse(localStorage.getItem('sparfuchs_favorites') || '[]'),
+  radarDismissed: false,
   // Shopping list history & household stats
   history: JSON.parse(localStorage.getItem('sparfuchs_history') || '[]'),
   householdStats: null,
@@ -116,6 +120,18 @@ const elements = {
   offersTableContainer: document.getElementById('offersTableContainer'),
   offersTableBody: document.getElementById('offersTableBody'),
   toast: document.getElementById('toast'),
+  // Favoriten-Radar (Deal-Alarm)
+  favoritesRadarContainer: document.getElementById('favoritesRadarContainer'),
+  radarTitleText: document.getElementById('radarTitleText'),
+  radarCardsGrid: document.getElementById('radarCardsGrid'),
+  closeRadarBtn: document.getElementById('closeRadarBtn'),
+  // Einkaufsliste Toolbar (Teilen & Leeren)
+  shareBasketBtn: document.getElementById('shareBasketBtn'),
+  clearBasketBtn: document.getElementById('clearBasketBtn'),
+  // Vorrats-Kalkulator / Jahres-Projektion
+  kpiAnnualSavings: document.getElementById('kpiAnnualSavings'),
+  kpiMonthlySavings: document.getElementById('kpiMonthlySavings'),
+  kpiAvgSavingsPerTrip: document.getElementById('kpiAvgSavingsPerTrip'),
 };
 
 /**
@@ -170,11 +186,13 @@ function toggleFavorite(title) {
   } else {
     state.favorites.push(clean);
     showToast(`⭐ "${clean}" zu Favoriten hinzugefügt!`);
+    state.radarDismissed = false; // Wieder anzeigen wenn neue Favoriten hinzukommen
   }
 
   saveFavorites();
   renderFavoritesBadge();
   renderOffers(state.offers);
+  updateFavoritesRadar(state.offers);
 }
 
 function saveFavorites() {
@@ -507,6 +525,9 @@ function renderOffers(offers) {
       toggleFavorite(title);
     });
   });
+
+  // Favoriten-Radar aktualisieren (Deal-Alarm)
+  updateFavoritesRadar(offers);
 }
 
 /**
@@ -563,7 +584,7 @@ async function loadCategories() {
 }
 
 /**
- * Warenkorb Verwaltung (Supermarkt-Gruppiert!)
+ * Warenkorb Verwaltung (Supermarkt-Gruppiert mit Mengen-Auswahl!)
  */
 function addToBasket(itemOrTitle) {
   let item = null;
@@ -574,23 +595,47 @@ function addToBasket(itemOrTitle) {
       retailer: 'Einkaufsnotiz (Ohne Festlegung)',
       price: 0,
       formattedPrice: '—',
+      quantity: 1,
       checked: false,
     };
   } else {
-    item = itemOrTitle;
+    item = {
+      ...itemOrTitle,
+      quantity: (typeof itemOrTitle.quantity === 'number' && itemOrTitle.quantity > 0) ? itemOrTitle.quantity : 1,
+    };
   }
 
   if (!item.title) return;
 
-  // Prüfen ob bereits exakt dieses Angebot auf der Liste ist
-  const exists = state.basket.some(b => b.id === item.id || (b.title === item.title && b.retailer === item.retailer));
-  if (!exists) {
+  // Prüfen ob bereits exakt dieses Angebot auf der Liste ist -> Menge erhöhen!
+  const existingIdx = state.basket.findIndex(b => b.id === item.id || (b.title === item.title && b.retailer === item.retailer));
+  if (existingIdx !== -1) {
+    state.basket[existingIdx].quantity = (state.basket[existingIdx].quantity || 1) + (item.quantity || 1);
+    saveBasket();
+    renderBasket();
+    showToast(`➕ Menge erhöht: "${item.title}" (${state.basket[existingIdx].quantity}x)`);
+  } else {
     state.basket.push(item);
     saveBasket();
     renderBasket();
     showToast(`✅ "${item.title}" (${item.retailer}) hinzugefügt!`);
+  }
+}
+
+/**
+ * Erhöht oder verringert die Stückzahl eines Artikels im Warenkorb
+ */
+function updateItemQuantity(id, delta) {
+  const item = state.basket.find(i => i.id === id);
+  if (!item) return;
+  const currentQty = (typeof item.quantity === 'number' && item.quantity > 0) ? item.quantity : 1;
+  const newQty = currentQty + delta;
+  if (newQty <= 0) {
+    removeFromBasket(id);
   } else {
-    showToast(`ℹ️ "${item.title}" ist bereits bei ${item.retailer} notiert`);
+    item.quantity = newQty;
+    saveBasket();
+    renderBasket();
   }
 }
 
@@ -611,9 +656,26 @@ function toggleItemChecked(id) {
 
 function saveBasket() {
   localStorage.setItem('sparfuchs_basket_v2', JSON.stringify(state.basket));
-  elements.basketCountBadge.textContent = state.basket.length;
+  const totalCount = state.basket.reduce((sum, it) => sum + (it.quantity || 1), 0);
+  elements.basketCountBadge.textContent = totalCount;
   if (elements.mobileBasketBadge) {
-    elements.mobileBasketBadge.textContent = state.basket.length;
+    elements.mobileBasketBadge.textContent = totalCount;
+  }
+}
+
+/**
+ * Leert den gesamten Einkaufszettel nach Bestätigung
+ */
+function clearAllBasket() {
+  if (!state.basket || state.basket.length === 0) {
+    showToast('Dein Einkaufszettel ist bereits leer.');
+    return;
+  }
+  if (confirm('Möchtest du wirklich alle Artikel von deinem Einkaufszettel entfernen?')) {
+    state.basket = [];
+    saveBasket();
+    renderBasket();
+    showToast('🗑️ Einkaufszettel vollständig geleert');
   }
 }
 
@@ -665,10 +727,11 @@ function getItemSavings(item) {
 }
 
 /**
- * Rendert die Einkaufsliste GRUPPIERT nach Supermarkt und berechnet die Gesamtersparnis!
+ * Rendert die Einkaufsliste GRUPPIERT nach Supermarkt mit Mengen-Steuerung (+/-) und Ersparnissen!
  */
 function renderBasket() {
-  elements.basketCountBadge.textContent = state.basket.length;
+  const totalUnits = state.basket.reduce((sum, it) => sum + (it.quantity || 1), 0);
+  elements.basketCountBadge.textContent = totalUnits;
   elements.basketPlzDisplay.textContent = state.zip;
 
   if (state.basket.length === 0) {
@@ -695,13 +758,14 @@ function renderBasket() {
     }
     groups[store].push(item);
     
+    const qty = (typeof item.quantity === 'number' && item.quantity > 0) ? item.quantity : 1;
     if (typeof item.price === 'number' && item.price > 0) {
-      grandTotal += item.price;
+      grandTotal += item.price * qty;
       const sanitizedOld = validateAndSanitizeClientPrice(item.price, item.oldPrice, item.isNonFood);
       const effectiveOld = (sanitizedOld && sanitizedOld > item.price)
         ? sanitizedOld
         : (item.price * 1.25);
-      grandOriginalTotal += effectiveOld;
+      grandOriginalTotal += effectiveOld * qty;
     }
   });
 
@@ -710,11 +774,12 @@ function renderBasket() {
   // HTML für jeden Supermarkt generieren
   const groupHtml = Object.keys(groups).map(store => {
     const items = groups[store];
-    const storeOfferTotal = items.reduce((sum, it) => sum + (it.price || 0), 0);
+    const storeOfferTotal = items.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 1)), 0);
     const storeOriginalTotal = items.reduce((sum, it) => {
+      const qty = it.quantity || 1;
       const sanitizedOld = validateAndSanitizeClientPrice(it.price, it.oldPrice, it.isNonFood);
-      if (sanitizedOld && sanitizedOld > it.price) return sum + sanitizedOld;
-      if (it.price > 0) return sum + (it.price * 1.25);
+      if (sanitizedOld && sanitizedOld > it.price) return sum + (sanitizedOld * qty);
+      if (it.price > 0) return sum + ((it.price * 1.25) * qty);
       return sum;
     }, 0);
     const storeSavings = Math.max(0, storeOriginalTotal - storeOfferTotal);
@@ -729,7 +794,7 @@ function renderBasket() {
           <div class="store-badge-title">
             <span>🏪</span>
             <strong>${store}</strong>
-            <span style="font-size:0.75rem; color:var(--text-dim);">(${items.length} Artikel)</span>
+            <span style="font-size:0.75rem; color:var(--text-dim);">(${items.length} Posten)</span>
           </div>
           <div class="store-totals-block">
             <div class="store-subtotal">${subtotalStr ? `Angebot: ${subtotalStr}` : ''}</div>
@@ -740,11 +805,15 @@ function renderBasket() {
         
         <div class="store-items-list">
           ${items.map(it => {
+            const qty = (typeof it.quantity === 'number' && it.quantity > 0) ? it.quantity : 1;
             const hasOld = (typeof it.oldPrice === 'number' && it.oldPrice > it.price);
             const oldPriceVal = hasOld ? it.oldPrice : (it.price > 0 ? it.price * 1.25 : null);
-            const itemSavings = (oldPriceVal && oldPriceVal > it.price) ? (oldPriceVal - it.price) : 0;
-            const itemDiscountPct = (oldPriceVal && oldPriceVal > it.price) ? Math.round((itemSavings / oldPriceVal) * 100) : null;
-            const oldPriceFormatted = it.formattedOldPrice || (oldPriceVal ? `${oldPriceVal.toFixed(2).replace('.', ',')} €` : '');
+            const itemSavingsPerUnit = (oldPriceVal && oldPriceVal > it.price) ? (oldPriceVal - it.price) : 0;
+            const itemTotalSavings = itemSavingsPerUnit * qty;
+            const itemDiscountPct = (oldPriceVal && oldPriceVal > it.price) ? Math.round((itemSavingsPerUnit / oldPriceVal) * 100) : null;
+            const lineTotal = (it.price > 0) ? (it.price * qty) : 0;
+            const lineTotalFormatted = lineTotal > 0 ? `${lineTotal.toFixed(2).replace('.', ',')} €` : '—';
+            const unitPriceFormatted = it.formattedPrice || (it.price > 0 ? `${it.price.toFixed(2).replace('.', ',')} €` : '');
 
             return `
               <div class="basket-item-row ${it.checked ? 'checked' : ''}" data-id="${it.id}">
@@ -756,12 +825,20 @@ function renderBasket() {
                     ${it.checked ? 'checked' : ''}
                     title="Als erledigt abhaken"
                   >
+                  <div class="basket-qty-control" title="Stückzahl anpassen">
+                    <button type="button" class="btn-qty btn-qty-minus" data-id="${it.id}" title="1 weniger">−</button>
+                    <span class="qty-num">${qty}</span>
+                    <button type="button" class="btn-qty btn-qty-plus" data-id="${it.id}" title="1 mehr">+</button>
+                  </div>
                   <div class="basket-item-info">
                     <span class="basket-item-name">${it.title}</span>
-                    ${itemSavings > 0 ? `
+                    ${qty > 1 && it.price > 0 ? `
+                      <div class="basket-item-single-calc">${qty} × ${unitPriceFormatted}</div>
+                    ` : ''}
+                    ${itemTotalSavings > 0 ? `
                       <div class="basket-item-subprice">
-                        <span class="basket-item-statt">statt ${oldPriceFormatted}</span>
-                        <span class="basket-item-saving">Du sparst ${itemSavings.toFixed(2).replace('.', ',')} €</span>
+                        <span class="basket-item-statt">statt ${(oldPriceVal * qty).toFixed(2).replace('.', ',')} €</span>
+                        <span class="basket-item-saving">Du sparst ${itemTotalSavings.toFixed(2).replace('.', ',')} €</span>
                       </div>
                     ` : ''}
                   </div>
@@ -769,7 +846,7 @@ function renderBasket() {
                 <div class="basket-item-right">
                   ${it.price > 0 ? `
                     <div class="basket-item-price-col">
-                      <span class="basket-item-price">${it.formattedPrice}</span>
+                      <span class="basket-item-price">${lineTotalFormatted}</span>
                       ${itemDiscountPct ? `<span class="basket-item-discount-pill">-${itemDiscountPct}%</span>` : ''}
                     </div>
                   ` : ''}
@@ -806,8 +883,23 @@ function renderBasket() {
   }
 
   if (elements.mobileBasketBadge) {
-    elements.mobileBasketBadge.textContent = state.basket.length;
+    elements.mobileBasketBadge.textContent = totalUnits;
   }
+
+  // Event Listener für Mengen-Steuerung (+/-)
+  elements.basketGroupedContainer.querySelectorAll('.btn-qty-minus').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      updateItemQuantity(btn.getAttribute('data-id'), -1);
+    });
+  });
+
+  elements.basketGroupedContainer.querySelectorAll('.btn-qty-plus').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      updateItemQuantity(btn.getAttribute('data-id'), 1);
+    });
+  });
 
   // Event Listener für Checkboxen
   elements.basketGroupedContainer.querySelectorAll('.basket-checkbox').forEach(cb => {
@@ -816,10 +908,14 @@ function renderBasket() {
     });
   });
 
-  // Mobile-Optimierung: Tippen auf die gesamte Zeile hakt den Artikel ab
+  // Mobile-Optimierung: Tippen auf die gesamte Zeile hakt den Artikel ab (außer Buttons & Checkbox)
   elements.basketGroupedContainer.querySelectorAll('.basket-item-row').forEach(row => {
     row.addEventListener('click', (e) => {
-      if (e.target.closest('.btn-item-del') || e.target.classList.contains('basket-checkbox')) return;
+      if (
+        e.target.closest('.btn-item-del') ||
+        e.target.closest('.basket-qty-control') ||
+        e.target.classList.contains('basket-checkbox')
+      ) return;
       const id = row.getAttribute('data-id');
       if (id) toggleItemChecked(id);
     });
@@ -827,8 +923,217 @@ function renderBasket() {
 
   // Event Listener für Löschen
   elements.basketGroupedContainer.querySelectorAll('.btn-item-del').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
       removeFromBasket(btn.getAttribute('data-id'));
+    });
+  });
+}
+
+/**
+ * Formatiert den aktuellen Einkaufszettel als übersichtliche Text-Nachricht (z. B. für WhatsApp)
+ */
+function formatBasketShareText() {
+  if (!state.basket || state.basket.length === 0) return '';
+
+  const groups = {};
+  let grandTotal = 0;
+  let grandOriginalTotal = 0;
+
+  state.basket.forEach(item => {
+    const store = item.retailer || 'Einkaufsnotizen';
+    if (!groups[store]) groups[store] = [];
+    groups[store].push(item);
+
+    const qty = (typeof item.quantity === 'number' && item.quantity > 0) ? item.quantity : 1;
+    if (typeof item.price === 'number' && item.price > 0) {
+      grandTotal += item.price * qty;
+      const sanitizedOld = validateAndSanitizeClientPrice(item.price, item.oldPrice, item.isNonFood);
+      const effectiveOld = (sanitizedOld && sanitizedOld > item.price) ? sanitizedOld : (item.price * 1.25);
+      grandOriginalTotal += effectiveOld * qty;
+    }
+  });
+
+  const grandSavings = Math.max(0, grandOriginalTotal - grandTotal);
+  const totalUnits = state.basket.reduce((sum, it) => sum + (it.quantity || 1), 0);
+
+  let text = `🛒 *Mein SparFuchs Einkaufszettel* (PLZ: ${state.zip})\n`;
+  text += `━━━━━━━━━━━━━━━━━━━━━\n`;
+
+  Object.keys(groups).forEach(store => {
+    const items = groups[store];
+    const storeTotal = items.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 1)), 0);
+    text += `🏪 *${store.toUpperCase()}* (${items.length} Posten)\n`;
+    
+    items.forEach(it => {
+      const qty = it.quantity || 1;
+      const checkMark = it.checked ? '☑️' : '◻️';
+      const priceStr = it.price > 0 ? ` (${(it.price * qty).toFixed(2).replace('.', ',')} €)` : '';
+      const qtyStr = qty > 1 ? `${qty}x ` : '';
+      text += `${checkMark} ${qtyStr}${it.title}${priceStr}\n`;
+    });
+
+    if (storeTotal > 0) {
+      text += `👉 Zwischensumme: ${storeTotal.toFixed(2).replace('.', ',')} €\n`;
+    }
+    text += `\n`;
+  });
+
+  text += `━━━━━━━━━━━━━━━━━━━━━\n`;
+  if (grandTotal > 0) {
+    text += `💰 *Gesamtsumme:* ${grandTotal.toFixed(2).replace('.', ',')} € (${totalUnits} Artikel)\n`;
+    if (grandSavings > 0) {
+      const pct = Math.round((grandSavings / grandOriginalTotal) * 100);
+      text += `🎉 *Ersparnis:* -${grandSavings.toFixed(2).replace('.', ',')} € (-${pct}%)\n`;
+    }
+  } else {
+    text += `📝 *Gesamt:* ${totalUnits} Artikel notiert\n`;
+  }
+  text += `\nErstellt mit SparFuchs 🦊`;
+
+  return text;
+}
+
+/**
+ * 1-Klick Teilen (WhatsApp / Text via Web Share API oder Clipboard)
+ */
+async function shareBasket() {
+  if (!state.basket || state.basket.length === 0) {
+    showToast('⚠️ Dein Einkaufszettel ist noch leer!');
+    return;
+  }
+
+  const shareText = formatBasketShareText();
+
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: 'Mein SparFuchs Einkaufszettel',
+        text: shareText,
+      });
+      showToast('📤 Einkaufszettel geteilt!');
+      return;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      console.warn('Navigator share fehlgeschlagen:', err);
+    }
+  }
+
+  try {
+    await navigator.clipboard.writeText(shareText);
+    showToast('📋 In die Zwischenablage kopiert! Bereit für WhatsApp.');
+  } catch (err) {
+    const ta = document.createElement('textarea');
+    ta.value = shareText;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast('📋 In die Zwischenablage kopiert!');
+  }
+}
+
+/**
+ * Aktualisiert den Favoriten-Radar (Deal-Alarm Banner auf der Startseite)
+ */
+function updateFavoritesRadar(offers) {
+  const container = elements.favoritesRadarContainer;
+  const grid = elements.radarCardsGrid;
+  const title = elements.radarTitleText;
+  if (!container || !grid) return;
+
+  if (!state.favorites || state.favorites.length === 0 || state.radarDismissed) {
+    container.style.display = 'none';
+    return;
+  }
+
+  const pool = Array.isArray(offers) && offers.length > 0 ? offers : state.offers;
+  if (!pool || pool.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  // Finde alle Angebote, die zu einem Favoriten passen
+  const matchingDeals = pool.filter(o => isFavorite(o.title, o.brand));
+
+  if (matchingDeals.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  // Deduplizieren & Top-Angebote auswählen (max 6)
+  const uniqueDeals = [];
+  const seen = new Set();
+  for (const deal of matchingDeals) {
+    const key = `${deal.retailer}-${deal.title}`.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueDeals.push(deal);
+    }
+    if (uniqueDeals.length >= 6) break;
+  }
+
+  if (title) {
+    title.textContent = `${uniqueDeals.length} deiner Lieblingsprodukte diese Woche im Angebot!`;
+  }
+
+  grid.innerHTML = uniqueDeals.map(deal => {
+    const sanitizedOld = validateAndSanitizeClientPrice(deal.price, deal.oldPrice, deal.isNonFood);
+    const hasOld = sanitizedOld && sanitizedOld > deal.price;
+    const oldPriceFormatted = hasOld ? `${sanitizedOld.toFixed(2).replace('.', ',')} €` : '';
+    const discountText = deal.discountPercent ? `-${deal.discountPercent}%` : (hasOld ? `-${Math.round(((sanitizedOld - deal.price) / sanitizedOld) * 100)}%` : '');
+
+    return `
+      <div class="radar-card" data-id="${deal.id}">
+        <div class="radar-card-top">
+          <span class="radar-store-tag">${deal.retailer}</span>
+          ${discountText ? `<span class="radar-discount-badge">${discountText}</span>` : ''}
+        </div>
+        <div class="radar-product-title" title="${deal.title.replace(/"/g, '&quot;')}">${deal.title}</div>
+        <div class="radar-price-row">
+          <span class="radar-price">${deal.formattedPrice}</span>
+          ${oldPriceFormatted ? `<span class="radar-old-price">${oldPriceFormatted}</span>` : ''}
+          ${deal.formattedReferencePrice ? `<span class="radar-ref-price">${deal.formattedReferencePrice}</span>` : ''}
+        </div>
+        <button 
+          type="button" 
+          class="btn-radar-add" 
+          data-id="${deal.id}"
+          data-title="${deal.title.replace(/"/g, '&quot;')}"
+          data-retailer="${deal.retailer}"
+          data-price="${deal.price || 0}"
+          data-formatted-price="${deal.formattedPrice || ''}"
+          data-old-price="${sanitizedOld || ''}"
+          data-formatted-old-price="${oldPriceFormatted}"
+          data-estimated-old-price="${deal.isEstimatedOldPrice ? 'true' : 'false'}"
+        >
+          ➕ Auf Einkaufsliste
+        </button>
+      </div>
+    `;
+  }).join('');
+
+  container.style.display = 'block';
+
+  // Event Listener für Quick-Add Buttons im Radar
+  grid.querySelectorAll('.btn-radar-add').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const oldPriceRaw = btn.getAttribute('data-old-price');
+      const oldPrice = oldPriceRaw ? parseFloat(oldPriceRaw) : null;
+      const item = {
+        id: btn.getAttribute('data-id'),
+        title: btn.getAttribute('data-title'),
+        retailer: btn.getAttribute('data-retailer'),
+        price: parseFloat(btn.getAttribute('data-price')) || 0,
+        formattedPrice: btn.getAttribute('data-formatted-price'),
+        oldPrice: (typeof oldPrice === 'number' && !isNaN(oldPrice)) ? oldPrice : null,
+        formattedOldPrice: btn.getAttribute('data-formatted-old-price') || null,
+        isEstimatedOldPrice: btn.getAttribute('data-estimated-old-price') === 'true',
+        quantity: 1,
+        checked: false,
+      };
+      addToBasket(item);
     });
   });
 }
@@ -1129,19 +1434,22 @@ async function bookCurrentBasket() {
   // Berechnung der Gesamtsummen und Ersparnisse
   let totalPaid = 0;
   let totalRegular = 0;
+  let totalUnits = 0;
   const storesSet = new Set();
 
   state.basket.forEach(it => {
     const store = it.retailer || 'Einkaufsnotizen';
     storesSet.add(store);
+    const qty = (typeof it.quantity === 'number' && it.quantity > 0) ? it.quantity : 1;
+    totalUnits += qty;
 
     if (typeof it.price === 'number' && it.price > 0) {
-      totalPaid += it.price;
+      totalPaid += it.price * qty;
       const sanitizedOld = validateAndSanitizeClientPrice(it.price, it.oldPrice, it.isNonFood);
       const effectiveOld = (sanitizedOld && sanitizedOld > it.price)
         ? sanitizedOld
         : (it.price * 1.25);
-      totalRegular += effectiveOld;
+      totalRegular += effectiveOld * qty;
     }
   });
 
@@ -1150,6 +1458,7 @@ async function bookCurrentBasket() {
 
   // Snapshot der Artikel
   const itemsSnapshot = state.basket.map(it => {
+    const qty = (typeof it.quantity === 'number' && it.quantity > 0) ? it.quantity : 1;
     const sanitizedOld = validateAndSanitizeClientPrice(it.price, it.oldPrice, it.isNonFood);
     const effectiveOld = (sanitizedOld && sanitizedOld > it.price)
       ? sanitizedOld
@@ -1157,6 +1466,7 @@ async function bookCurrentBasket() {
     return {
       title: it.title,
       retailer: it.retailer || 'Einkaufsnotizen',
+      quantity: qty,
       price: it.price || 0,
       formattedPrice: it.formattedPrice || (it.price ? `${it.price.toFixed(2).replace('.', ',')} €` : ''),
       oldPrice: sanitizedOld,
@@ -1168,7 +1478,7 @@ async function bookCurrentBasket() {
   const payload = {
     date: new Date().toISOString(),
     stores,
-    itemCount: itemsSnapshot.length,
+    itemCount: totalUnits,
     totalPaid: parseFloat(totalPaid.toFixed(2)),
     totalRegular: parseFloat(totalRegular.toFixed(2)),
     totalSavings: parseFloat(totalSavings.toFixed(2)),
@@ -1310,6 +1620,17 @@ function renderHistoryUI(stats, receipts = []) {
     elements.kpiItemCount.textContent = `${s.totalItemsPurchased || 0} Artikel verbucht`;
   }
 
+  // Vorrats-Kalkulator & Ersparnis-Projektion auf 1 Jahr
+  if (elements.kpiAnnualSavings) {
+    elements.kpiAnnualSavings.textContent = `~${(s.projectedAnnualSavings || 0).toFixed(2).replace('.', ',')} €`;
+  }
+  if (elements.kpiMonthlySavings) {
+    elements.kpiMonthlySavings.textContent = `~${(s.projectedMonthlySavings || 0).toFixed(2).replace('.', ',')} €`;
+  }
+  if (elements.kpiAvgSavingsPerTrip) {
+    elements.kpiAvgSavingsPerTrip.textContent = `${(s.averageSavingsPerTrip || 0).toFixed(2).replace('.', ',')} €`;
+  }
+
   // 2. Top-Sparmärkte (Store Breakdown)
   if (elements.historyStoreBarsContainer) {
     if (!s.storesBreakdown || s.storesBreakdown.length === 0) {
@@ -1424,7 +1745,7 @@ function renderHistoryUI(stats, receipts = []) {
                   return `
                     <div class="receipt-detail-item">
                       <span class="item-title">
-                        ${it.checked ? '✓ ' : '• '} ${it.title} 
+                        ${it.checked ? '✓ ' : '• '} ${it.quantity && it.quantity > 1 ? `<strong>${it.quantity}x</strong> ` : ''}${it.title} 
                         <small style="color:var(--text-dim);">(${it.retailer})</small>
                       </span>
                       <span>
@@ -1705,6 +2026,24 @@ function initEvents() {
 
   // Optimize Button
   elements.optimizeBasketBtn.addEventListener('click', optimizeBasket);
+
+  // Einkaufsliste Quick Actions: Teilen (WhatsApp) & Leeren
+  if (elements.shareBasketBtn) {
+    elements.shareBasketBtn.addEventListener('click', shareBasket);
+  }
+  if (elements.clearBasketBtn) {
+    elements.clearBasketBtn.addEventListener('click', clearAllBasket);
+  }
+
+  // Favoriten-Radar Schließen-Button
+  if (elements.closeRadarBtn) {
+    elements.closeRadarBtn.addEventListener('click', () => {
+      state.radarDismissed = true;
+      if (elements.favoritesRadarContainer) {
+        elements.favoritesRadarContainer.style.display = 'none';
+      }
+    });
+  }
 
   // Einkauf abschließen & verbuchen Button
   if (elements.bookBasketBtn) {
