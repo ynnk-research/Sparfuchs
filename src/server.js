@@ -346,6 +346,37 @@ export function createApp() {
     }
   });
 
+  // 3.1 Synchronisation / Rehydrierung (schützt Daten bei Server-Neustarts & Render Spin-Downs)
+  app.post('/api/history/sync', (req, res) => {
+    try {
+      const clientHistory = Array.isArray(req.body.clientHistory) ? req.body.clientHistory : [];
+      let serverHistory = loadHistoryFromFile();
+
+      const mergedMap = new Map();
+      // Server-Einträge einfügen
+      serverHistory.forEach(item => {
+        if (item && item.id) mergedMap.set(item.id, item);
+      });
+      // Client-Einträge hinzufügen (falls auf dem Server noch fehlend)
+      clientHistory.forEach(item => {
+        if (item && item.id && !mergedMap.has(item.id)) {
+          mergedMap.set(item.id, item);
+        }
+      });
+
+      const unifiedHistory = Array.from(mergedMap.values()).sort((a, b) => {
+        return new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime();
+      });
+
+      saveHistoryToFile(unifiedHistory);
+      const stats = calculateHouseholdStats(unifiedHistory);
+      res.json({ success: true, history: unifiedHistory, stats });
+    } catch (err) {
+      console.error('Fehler bei POST /api/history/sync:', err);
+      res.status(500).json({ error: 'Fehler bei der Historie-Synchronisation', message: err.message });
+    }
+  });
+
   app.delete('/api/history/:id', (req, res) => {
     try {
       const { id } = req.params;
