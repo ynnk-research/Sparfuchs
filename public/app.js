@@ -1058,7 +1058,32 @@ async function fetchAndRenderHistory() {
     const res = await fetch('/api/history');
     if (res.ok) {
       const data = await res.json();
-      state.history = data.history || [];
+      const serverHistory = Array.isArray(data.history) ? data.history : [];
+
+      // Wenn der Server frisch gestartet ist (z. B. nach Render Spin-Down) und leer ist,
+      // aber der Client im localStorage noch Belege hat: Automatisch wiederherstellen!
+      if (serverHistory.length === 0 && state.history && state.history.length > 0) {
+        try {
+          const syncRes = await fetch('/api/history/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clientHistory: state.history }),
+          });
+          if (syncRes.ok) {
+            const syncData = await syncRes.json();
+            state.history = syncData.history || state.history;
+            state.householdStats = syncData.stats || state.householdStats;
+            localStorage.setItem('sparfuchs_history', JSON.stringify(state.history));
+            renderHistoryUI(state.householdStats, state.history);
+            updateHistoryBadge();
+            return;
+          }
+        } catch (syncErr) {
+          console.warn('Sync nach Spin-Down fehlgeschlagen:', syncErr);
+        }
+      }
+
+      state.history = serverHistory;
       state.householdStats = data.stats || null;
       localStorage.setItem('sparfuchs_history', JSON.stringify(state.history));
       renderHistoryUI(data.stats, data.history);
