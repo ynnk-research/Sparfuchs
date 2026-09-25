@@ -14,7 +14,12 @@ import { filterAndSortOffers, calculateBasketTotals } from './engine/comparator.
 import { optimizeBasket } from './engine/optimizer.js';
 import { loadHistoryFromFile, saveHistoryToFile, calculateHouseholdStats } from './engine/history.js';
 import { CATEGORY_DEFINITIONS } from './engine/categories.js';
-import QRCode from 'qrcode';
+let QRCode = null;
+try {
+  QRCode = (await import('qrcode')).default;
+} catch (err) {
+  console.warn('⚠️ Paket "qrcode" nicht gefunden – verwende automatischen Online-Fallback.');
+}
 import os from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -478,16 +483,21 @@ export function createApp() {
 
       const shareUrl = `${protocol}://${host}/?basket_share=${shareId}`;
 
-      // Hochwertigen QR-Code als PNG Data-URL erzeugen
-      const qrDataUrl = await QRCode.toDataURL(shareUrl, {
-        errorCorrectionLevel: 'M',
-        margin: 2,
-        scale: 7,
-        color: {
-          dark: '#051410',
-          light: '#ffffff',
-        },
-      });
+      // Hochwertigen QR-Code als PNG Data-URL erzeugen (mit Fallback falls qrcode-Paket nicht vorhanden ist)
+      let qrDataUrl = '';
+      if (QRCode) {
+        qrDataUrl = await QRCode.toDataURL(shareUrl, {
+          errorCorrectionLevel: 'M',
+          margin: 2,
+          scale: 7,
+          color: {
+            dark: '#051410',
+            light: '#ffffff',
+          },
+        });
+      } else {
+        qrDataUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(shareUrl)}`;
+      }
 
       res.json({
         success: true,
@@ -531,6 +541,10 @@ export function createApp() {
       const text = req.query.text;
       if (!text) {
         return res.status(400).send('Query parameter "text" fehlt');
+      }
+
+      if (!QRCode) {
+        return res.redirect(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(text)}`);
       }
 
       const format = req.query.format || 'png';
