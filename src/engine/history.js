@@ -64,6 +64,8 @@ export function calculateHouseholdStats(receipts = []) {
       totalItemsPurchased: 0,
       averageSpentPerTrip: 0,
       averageSavingsPerTrip: 0,
+      projectedAnnualSavings: 0,
+      projectedMonthlySavings: 0,
       storesBreakdown: [],
       monthlyBreakdown: [],
     };
@@ -183,6 +185,8 @@ export function calculateHouseholdStats(receipts = []) {
     totalItemsPurchased,
     averageSpentPerTrip,
     averageSavingsPerTrip,
+    projectedAnnualSavings: parseFloat((averageSavingsPerTrip * 52).toFixed(2)),
+    projectedMonthlySavings: parseFloat(((averageSavingsPerTrip * 52) / 12).toFixed(2)),
     storesBreakdown,
     monthlyBreakdown,
   };
