@@ -288,7 +288,10 @@
           <span class="drawer-subtitle">Übersichtlich nach Supermarkt sortiert</span>
         </div>
       </div>
-      <button id="closeBasketBtn" class="btn-close" aria-label="Schließen">✕</button>
+      <button id="closeBasketBtn" class="btn-close" aria-label="Einkaufsliste schließen" title="Zurück zu Angeboten">
+        <span class="close-icon">✕</span>
+        <span class="close-text">Schließen</span>
+      </button>
     </div>
 
     <div class="drawer-body">
@@ -350,6 +353,11 @@
       <div id="optimizationResultContainer" class="optimization-result-box" style="display: none;">
         <!-- Rendered via JavaScript -->
       </div>
+
+      <!-- Zusätzlicher Zurück-Button am Ende der Liste für Mobile -->
+      <button type="button" id="backToOffersBtnBasket" class="btn-back-to-offers">
+        ← Zurück zu den Angeboten
+      </button>
     </div>
   </aside>
 
@@ -363,7 +371,10 @@
           <span class="drawer-subtitle">Verbuchte Einkäufe & Langzeit-Ersparnisse</span>
         </div>
       </div>
-      <button id="closeHistoryBtn" class="btn-close" aria-label="Schließen">✕</button>
+      <button id="closeHistoryBtn" class="btn-close" aria-label="Haushaltsplan schließen" title="Zurück zu Angeboten">
+        <span class="close-icon">✕</span>
+        <span class="close-text">Schließen</span>
+      </button>
     </div>
 
     <div class="drawer-body history-body">
@@ -429,6 +440,11 @@
           <!-- Rendered via JavaScript -->
         </div>
       </div>
+
+      <!-- Zusätzlicher Zurück-Button am Ende der Historie für Mobile -->
+      <button type="button" id="backToOffersBtnHistory" class="btn-back-to-offers">
+        ← Zurück zu den Angeboten
+      </button>
     </div>
   </aside>
 

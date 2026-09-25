@@ -1345,6 +1345,72 @@ input, select {
   color: var(--text-muted);
 }
 
+/* Drawer Close Button */
+.btn-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  padding: 0.45rem 0.85rem;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  min-height: 40px;
+  min-width: 40px;
+  transition: all var(--transition-fast);
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+
+.btn-close:hover,
+.btn-close:active {
+  background: rgba(255, 51, 102, 0.2);
+  border-color: #ff3366;
+  color: #ff3366;
+}
+
+.btn-close .close-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.btn-close .close-text {
+  font-size: 0.84rem;
+}
+
+/* Sekundärer Zurück-Button am Ende des Drawers */
+.btn-back-to-offers {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  margin-top: 1rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  border-radius: var(--radius-pill);
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  min-height: 48px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn-back-to-offers:hover,
+.btn-back-to-offers:active {
+  background: rgba(0, 229, 153, 0.12);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
 .drawer-body {
   padding: 1.25rem;
   display: flex;
@@ -2614,19 +2680,30 @@ input, select {
     font-size: 1.15rem;
   }
 
+  .btn-close,
   .btn-close-drawer {
-    width: 42px;
-    height: 42px;
-    min-width: 42px;
-    min-height: 42px;
-    display: flex;
+    display: inline-flex !important;
     align-items: center;
     justify-content: center;
-    font-size: 1.4rem;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.06);
+    gap: 0.4rem;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0.45rem 0.95rem;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: var(--radius-pill);
     color: #ffffff;
+    font-size: 0.92rem;
+    font-weight: 700;
     cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  }
+
+  .btn-close:active,
+  .btn-close-drawer:active {
+    background: rgba(255, 51, 102, 0.3);
+    border-color: #ff3366;
+    color: #ff3366;
   }
 
   .drawer-body {

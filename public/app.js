@@ -1672,6 +1672,9 @@ function initEvents() {
   }
   elements.closeBasketBtn.addEventListener('click', closeAllDrawers);
 
+  const backBasket = document.getElementById('backToOffersBtnBasket');
+  if (backBasket) backBasket.addEventListener('click', closeAllDrawers);
+
   if (elements.openHistoryBtn) {
     elements.openHistoryBtn.addEventListener('click', openHistoryDrawer);
   }
@@ -1679,7 +1682,15 @@ function initEvents() {
     elements.closeHistoryBtn.addEventListener('click', closeHistoryDrawer);
   }
 
+  const backHistory = document.getElementById('backToOffersBtnHistory');
+  if (backHistory) backHistory.addEventListener('click', closeAllDrawers);
+
   elements.drawerBackdrop.addEventListener('click', closeAllDrawers);
+
+  // ESC-Taste schließt geöffnete Drawer
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeAllDrawers();
+  });
 
   // Basket Manual Item Add Form
   elements.basketAddForm.addEventListener('submit', (e) => {
