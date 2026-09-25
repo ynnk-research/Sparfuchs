@@ -75,6 +75,8 @@ const elements = {
   basketPlzDisplay: document.getElementById('basketPlzDisplay'),
   openBasketBtn: document.getElementById('openBasketBtn'),
   closeBasketBtn: document.getElementById('closeBasketBtn'),
+  mobileBasketFab: document.getElementById('mobileBasketFab'),
+  mobileBasketBadge: document.getElementById('mobileBasketBadge'),
   basketDrawer: document.getElementById('basketDrawer'),
   drawerBackdrop: document.getElementById('drawerBackdrop'),
   basketCountBadge: document.getElementById('basketCountBadge'),
@@ -610,6 +612,9 @@ function toggleItemChecked(id) {
 function saveBasket() {
   localStorage.setItem('sparfuchs_basket_v2', JSON.stringify(state.basket));
   elements.basketCountBadge.textContent = state.basket.length;
+  if (elements.mobileBasketBadge) {
+    elements.mobileBasketBadge.textContent = state.basket.length;
+  }
 }
 
 /**
@@ -800,10 +805,23 @@ function renderBasket() {
     elements.basketTotalBar.style.display = 'none';
   }
 
+  if (elements.mobileBasketBadge) {
+    elements.mobileBasketBadge.textContent = state.basket.length;
+  }
+
   // Event Listener für Checkboxen
   elements.basketGroupedContainer.querySelectorAll('.basket-checkbox').forEach(cb => {
     cb.addEventListener('change', () => {
       toggleItemChecked(cb.getAttribute('data-id'));
+    });
+  });
+
+  // Mobile-Optimierung: Tippen auf die gesamte Zeile hakt den Artikel ab
+  elements.basketGroupedContainer.querySelectorAll('.basket-item-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.btn-item-del') || e.target.classList.contains('basket-checkbox')) return;
+      const id = row.getAttribute('data-id');
+      if (id) toggleItemChecked(id);
     });
   });
 
@@ -1649,6 +1667,9 @@ function initEvents() {
   };
 
   elements.openBasketBtn.addEventListener('click', openBasketDrawer);
+  if (elements.mobileBasketFab) {
+    elements.mobileBasketFab.addEventListener('click', openBasketDrawer);
+  }
   elements.closeBasketBtn.addEventListener('click', closeAllDrawers);
 
   if (elements.openHistoryBtn) {

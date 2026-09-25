@@ -2280,3 +2280,480 @@ input, select {
   color: var(--text-main);
 }
 
+/* ==========================================================================
+   Mobile Floating Action Button (FAB) für schnellen Einkaufslisten-Zugriff
+   ========================================================================== */
+.mobile-basket-fab {
+  display: none;
+  position: fixed;
+  bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
+  right: 1.25rem;
+  z-index: 150;
+  background: var(--accent-gradient);
+  color: #051410;
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 0.75rem 1.15rem;
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 0.95rem;
+  box-shadow: 0 8px 28px rgba(0, 229, 153, 0.4), 0 2px 10px rgba(0, 0, 0, 0.5);
+  align-items: center;
+  gap: 0.55rem;
+  cursor: pointer;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-basket-fab:active {
+  transform: scale(0.95);
+}
+
+.fab-icon-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.fab-icon-wrapper svg {
+  width: 22px;
+  height: 22px;
+}
+
+.fab-count-badge {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  background: #ff3366;
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.1rem 0.35rem;
+  border-radius: 999px;
+  border: 2px solid #051410;
+  min-width: 18px;
+  text-align: center;
+  line-height: 1;
+}
+
+.fab-label {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+/* ==========================================================================
+   Responsive Mobile Breakpoint (Smartphones & Tablets <= 768px)
+   ========================================================================== */
+@media (max-width: 768px) {
+  /* Globale Mobile Anpassungen */
+  html, body {
+    overflow-x: hidden;
+  }
+
+  /* iOS Auto-Zoom Verhinderung bei Formular-Fokus */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+
+  /* Floating Action Button auf Smartphones einblenden */
+  .mobile-basket-fab {
+    display: flex;
+  }
+
+  /* Header */
+  .app-header {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .header-container {
+    gap: 0.5rem;
+  }
+
+  .brand-group {
+    gap: 0.5rem;
+  }
+
+  .brand-icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .brand-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .brand-name {
+    font-size: 1.25rem;
+  }
+
+  .brand-badge {
+    display: none; /* Auf kleinen Bildschirmen ausblenden für mehr Platz */
+  }
+
+  .header-actions {
+    gap: 0.45rem;
+  }
+
+  .plz-wrapper {
+    padding: 0.25rem 0.45rem 0.25rem 0.55rem;
+  }
+
+  .icon-location {
+    width: 14px;
+    height: 14px;
+    margin-right: 0.2rem;
+  }
+
+  .plz-wrapper input {
+    width: 44px;
+    font-size: 0.88rem !important;
+  }
+
+  .btn-icon {
+    width: 24px;
+    height: 24px;
+  }
+
+  .btn-icon svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  /* Text-Labels in Header-Buttons auf Mobile ausblenden (nur Icons + Zähler anzeigen) */
+  .basket-label,
+  .history-label {
+    display: none;
+  }
+
+  .btn-basket {
+    padding: 0.45rem 0.65rem;
+    gap: 0.35rem;
+  }
+
+  .btn-icon-labeled {
+    padding: 0.45rem 0.65rem;
+  }
+
+  /* Hero & Suche */
+  .hero-section {
+    padding: 1.25rem 0.75rem 1rem;
+  }
+
+  .hero-title {
+    font-size: 1.4rem;
+    line-height: 1.25;
+    margin-bottom: 0.4rem;
+  }
+
+  .hero-subtitle {
+    font-size: 0.82rem;
+    margin-bottom: 1rem;
+  }
+
+  .search-form {
+    gap: 0.45rem;
+  }
+
+  .search-input-wrapper {
+    height: 48px;
+  }
+
+  .search-input-wrapper input {
+    padding-left: 2.5rem;
+    font-size: 0.95rem !important;
+  }
+
+  .search-icon-left {
+    left: 0.85rem;
+    width: 17px;
+    height: 17px;
+  }
+
+  .btn-search {
+    height: 46px;
+    font-size: 0.95rem;
+    padding: 0 1.15rem;
+  }
+
+  /* Kategorie-Chips: Horizontales Wischen mit dem Daumen */
+  .category-bar {
+    padding: 0.4rem 0.75rem;
+  }
+
+  .category-chips {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 0.45rem;
+    padding-bottom: 0.35rem;
+  }
+
+  .category-chips::-webkit-scrollbar {
+    display: none;
+  }
+
+  .category-chip {
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: 0.45rem 0.75rem;
+    font-size: 0.82rem;
+    border-radius: var(--radius-pill);
+  }
+
+  .category-chip .category-icon {
+    font-size: 1rem;
+  }
+
+  /* Filterleiste */
+  .filter-bar {
+    padding: 0.75rem 0.75rem 0.5rem;
+    gap: 0.65rem;
+  }
+
+  .filter-controls-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .filter-pills-row {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .filter-tag-pill {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.78rem;
+  }
+
+  .sort-select-wrapper select {
+    width: 100%;
+    padding: 0.55rem 0.85rem;
+  }
+
+  .retailer-chips-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 0.25rem;
+  }
+
+  .retailer-chips-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .chip-retailer {
+    flex-shrink: 0;
+    padding: 0.35rem 0.65rem;
+    font-size: 0.78rem;
+  }
+
+  /* Main Container & Angebotskarten */
+  .main-container {
+    padding: 0 0.5rem 6rem; /* Extra Platz unten für den FAB */
+  }
+
+  .results-header {
+    padding: 0.65rem 0.5rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
+  }
+
+  .offers-grid {
+    grid-template-columns: 1fr;
+    gap: 0.85rem;
+  }
+
+  .offer-card {
+    padding: 0.85rem;
+    border-radius: var(--radius-md);
+  }
+
+  .btn-add-basket {
+    min-height: 44px;
+    font-size: 0.92rem;
+    font-weight: 700;
+  }
+
+  /* ==========================================================================
+     EINKAUFSLISTEN-DRAWER AUF SMARTPHONES (Optimiert für den Laden)
+     ========================================================================== */
+  .basket-drawer,
+  .history-drawer {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    right: -100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    border-left: none;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+    box-shadow: none;
+  }
+
+  .basket-drawer.open,
+  .history-drawer.open {
+    right: 0 !important;
+  }
+
+  .drawer-header {
+    padding: 0.85rem 1rem;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .drawer-title-group h3 {
+    font-size: 1.15rem;
+  }
+
+  .btn-close-drawer {
+    width: 42px;
+    height: 42px;
+    min-width: 42px;
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+    cursor: pointer;
+  }
+
+  .drawer-body {
+    padding: 0.85rem 0.75rem;
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: calc(2.5rem + env(safe-area-inset-bottom, 0px));
+    gap: 0.85rem;
+  }
+
+  /* Manuelle Artikelerfassung */
+  .basket-add-form {
+    gap: 0.4rem;
+  }
+
+  .basket-add-form input {
+    height: 44px;
+    font-size: 16px !important;
+    padding: 0 0.75rem;
+  }
+
+  .btn-add-item {
+    height: 44px;
+    padding: 0 0.85rem;
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+
+  /* Supermarkt-Karten im Drawer */
+  .store-group-card {
+    border-radius: var(--radius-md);
+    margin-bottom: 0.4rem;
+  }
+
+  .store-group-header {
+    padding: 0.75rem 0.85rem;
+  }
+
+  .store-badge-title {
+    font-size: 0.95rem;
+  }
+
+  /* Einzelne Zeilen zum Abhaken: Große Touch-Targets für den Supermarkt */
+  .basket-item-row {
+    padding: 0.75rem 0.75rem;
+    min-height: 52px;
+    border-radius: var(--radius-sm);
+    gap: 0.65rem;
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .basket-item-row:active {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .basket-item-row.checked {
+    background: rgba(0, 229, 153, 0.07);
+    border-color: rgba(0, 229, 153, 0.25);
+  }
+
+  .basket-checkbox {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    min-height: 24px;
+    margin-top: 1px;
+    cursor: pointer;
+  }
+
+  .basket-item-name {
+    font-size: 0.95rem;
+    line-height: 1.3;
+    font-weight: 600;
+  }
+
+  .btn-item-del {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    border-radius: 50%;
+    background: rgba(255, 51, 102, 0.08);
+    color: #ff3366;
+  }
+
+  /* Abschluss- und Buchungsbutton */
+  .btn-book-basket {
+    min-height: 50px;
+    font-size: 1rem;
+    font-weight: 800;
+    border-radius: var(--radius-pill);
+    box-shadow: 0 4px 18px rgba(0, 229, 153, 0.35);
+  }
+
+  .btn-optimize {
+    min-height: 46px;
+    font-size: 0.95rem;
+  }
+
+  .basket-total-bar {
+    padding: 0.85rem;
+  }
+}
+
+/* Sehr kleine Displays (<= 380px) */
+@media (max-width: 380px) {
+  .brand-name {
+    font-size: 1.15rem;
+  }
+
+  .plz-wrapper {
+    display: none; /* PLZ auf winzigen Bildschirmen im Header minimieren */
+  }
+
+  .hero-title {
+    font-size: 1.25rem;
+  }
+
+  .basket-item-price {
+    font-size: 0.88rem;
+  }
+}
+
