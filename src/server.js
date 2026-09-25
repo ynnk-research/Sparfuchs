@@ -14,12 +14,42 @@ import { filterAndSortOffers, calculateBasketTotals } from './engine/comparator.
 import { optimizeBasket } from './engine/optimizer.js';
 import { loadHistoryFromFile, saveHistoryToFile, calculateHouseholdStats } from './engine/history.js';
 import { CATEGORY_DEFINITIONS } from './engine/categories.js';
+import QRCode from 'qrcode';
+import os from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Top-Supermarktketten in Marktguru für einen reichhaltigen "Alle Angebote"-Feed
 const MARKTGURU_STORES = ['Lidl', 'REWE', 'PENNY', 'Netto', 'Kaufland'];
+
+// Ermittelt die lokale LAN-IPv4-Adresse des PCs (für WLAN-Transfer im lokalen Netzwerk)
+export function getLocalIpAddress() {
+  try {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name] || []) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          return iface.address;
+        }
+      }
+    }
+  } catch {}
+  return 'localhost';
+}
+
+// In-Memory Speicher für QR-Code Warenkorb-Übertragungen (24h TTL)
+export const sharedBaskets = new Map();
+
+// Bereinigt abgelaufene QR-Shares periodisch alle 30 Minuten
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, data] of sharedBaskets.entries()) {
+    if (data.expiresAt < now) {
+      sharedBaskets.delete(id);
+    }
+  }
+}, 30 * 60 * 1000).unref();
 
 export function createApp() {
   const app = express();
@@ -414,6 +444,117 @@ export function createApp() {
       },
       ...CATEGORY_DEFINITIONS,
     ]);
+  });
+
+  // 5. QR-Code Warenkorb-Übertragung (PC ➔ Smartphone)
+  app.post('/api/basket/share', async (req, res) => {
+    try {
+      const { items, zipCode = '10115', targetHost } = req.body;
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: 'Einkaufszettel ist leer' });
+      }
+
+      // Eindeutige, kurze Share-ID (z. B. b-7k9p3)
+      const shareId = `b-${Date.now().toString(36).slice(-4)}${Math.random().toString(36).slice(2, 5)}`;
+      const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 Stunden
+
+      sharedBaskets.set(shareId, {
+        id: shareId,
+        items,
+        zipCode,
+        createdAt: new Date().toISOString(),
+        expiresAt,
+      });
+
+      // Bestimme die URL für das Smartphone
+      let protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+      let host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
+
+      if (targetHost && typeof targetHost === 'string' && targetHost.trim()) {
+        const cleanHost = targetHost.trim().replace(/^https?:\/\//, '');
+        protocol = targetHost.trim().startsWith('http://') ? 'http' : 'https';
+        host = cleanHost;
+      }
+
+      const shareUrl = `${protocol}://${host}/?basket_share=${shareId}`;
+
+      // Hochwertigen QR-Code als PNG Data-URL erzeugen
+      const qrDataUrl = await QRCode.toDataURL(shareUrl, {
+        errorCorrectionLevel: 'M',
+        margin: 2,
+        scale: 7,
+        color: {
+          dark: '#051410',
+          light: '#ffffff',
+        },
+      });
+
+      res.json({
+        success: true,
+        shareId,
+        shareUrl,
+        qrDataUrl,
+        itemCount: items.length,
+        expiresAt: new Date(expiresAt).toISOString(),
+        localIp: getLocalIpAddress(),
+      });
+    } catch (err) {
+      console.error('Fehler bei POST /api/basket/share:', err);
+      res.status(500).json({ error: 'Fehler beim Erstellen des QR-Codes', message: err.message });
+    }
+  });
+
+  app.get('/api/basket/share/:id', (req, res) => {
+    try {
+      const { id } = req.params;
+      const data = sharedBaskets.get(id);
+
+      if (!data || data.expiresAt < Date.now()) {
+        if (data) sharedBaskets.delete(id);
+        return res.status(404).json({ error: 'Einkaufszettel nicht gefunden oder abgelaufen' });
+      }
+
+      res.json({
+        success: true,
+        items: data.items,
+        zipCode: data.zipCode,
+        createdAt: data.createdAt,
+      });
+    } catch (err) {
+      console.error('Fehler bei GET /api/basket/share/:id:', err);
+      res.status(500).json({ error: 'Fehler beim Abrufen des Einkaufszettels', message: err.message });
+    }
+  });
+
+  app.get('/api/qr', async (req, res) => {
+    try {
+      const text = req.query.text;
+      if (!text) {
+        return res.status(400).send('Query parameter "text" fehlt');
+      }
+
+      const format = req.query.format || 'png';
+      if (format === 'svg') {
+        const svg = await QRCode.toString(text, {
+          type: 'svg',
+          margin: 2,
+          color: { dark: '#051410', light: '#ffffff' },
+        });
+        res.setHeader('Content-Type', 'image/svg+xml');
+        return res.send(svg);
+      }
+
+      const buffer = await QRCode.toBuffer(text, {
+        margin: 2,
+        scale: 7,
+        color: { dark: '#051410', light: '#ffffff' },
+      });
+      res.setHeader('Content-Type', 'image/png');
+      res.send(buffer);
+    } catch (err) {
+      console.error('Fehler bei GET /api/qr:', err);
+      res.status(500).send('Fehler beim Generieren des QR-Codes');
+    }
   });
 
   return app;
