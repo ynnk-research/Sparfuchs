@@ -97,14 +97,55 @@ export function isOfferCurrentlyValid(offer, referenceDate = new Date()) {
 }
 
 /**
+ * Whitelist echter Supermärkte, Discounter, Drogerien und Bio-Supermärkte in Deutschland
+ */
+export const SUPERMARKET_WHITELIST = [
+  'aldi', 'lidl', 'rewe', 'edeka', 'kaufland', 'penny', 'netto',
+  'marktkauf', 'norma', 'tegut', 'globus', 'hit', 'konsum',
+  'feneberg', 'famila', 'combi', 'wasgau', 'v-markt', 'bünting',
+  'dm', 'rossmann', 'müller', 'budni',
+  'alnatura', 'denns', 'bio company',
+];
+
+/**
+ * Blacklist von Möbelhäusern, Baumärkten, Elektronik- und Bekleidungsgeschäften
+ */
+export const NON_SUPERMARKET_BLACKLIST = [
+  'xxxlutz', 'mömax', 'moemax', 'poco', 'ikea', 'roller', 'höffner', 'hoeffner',
+  'porta', 'jysk', 'dänisches bettenlager', 'sconto', 'segmüller', 'segmueller',
+  'obi', 'bauhaus', 'hornbach', 'toom', 'hellweg', 'hagebau',
+  'mediamarkt', 'saturn', 'expert', 'euronics', 'cyberport', 'conrad',
+  'ernsting', 'kik', 'takko', 'woolworth', 'tedi', 'action', 'thomas philipps',
+  'decathlon', 'intersport', 'atu', 'pitstop',
+];
+
+/**
+ * Prüft, ob ein Händler ein echter Lebensmittel- oder Drogeriemarkt ist
+ */
+export function isGenuineSupermarket(retailerName) {
+  if (!retailerName || typeof retailerName !== 'string') return true; // Keine Händlerangabe (z.B. in Test-Mocks)
+  const lower = retailerName.toLowerCase().trim();
+
+  // 1. Blacklist hat absolute Priorität (Möbelhäuser, Baumärkte, Elektronik etc.)
+  if (NON_SUPERMARKET_BLACKLIST.some(bl => lower.includes(bl))) {
+    return false;
+  }
+
+  // 2. Muss in der Supermarkt-/Drogerie-Whitelist enthalten sein
+  return SUPERMARKET_WHITELIST.some(wl => lower.includes(wl));
+}
+
+/**
  * Filtert und sortiert eine Liste von normalisierten Angeboten
  */
 export function filterAndSortOffers(offers, options = {}) {
   if (!Array.isArray(offers)) return [];
 
   const {
-    sortBy = 'refPrice', // 'refPrice' | 'price' | 'discount' | 'validTo' | 'title'
+    sortBy = 'refPrice', // 'refPrice' | 'price' | 'discount' | 'validTo' | 'title' | 'retailer'
     retailers = [],       // z. B. ['Lidl', 'Aldi', 'Rewe']
+    allowedRetailers = [], // wenn gesetzt: nur Angebote von diesen aktiven Supermärkten
+    strictSupermarketOnly = true, // wenn true, Non-Supermärkte (Möbelhäuser, Baumärkte) ausschließen
     category = 'all',     // 'all' | 'dairy' | 'produce' | 'meat' | 'drinks' | 'snacks' | 'pantry' | 'nonfood'
     excludeAppOnly = false, // wenn true, Angebote mit requiresApp ausschließen
     validNowOnly = false, // wenn true, nur aktuell gültige Angebote
@@ -120,7 +161,7 @@ export function filterAndSortOffers(offers, options = {}) {
 
   const retailerFilters = (Array.isArray(retailers) ? retailers : [retailers])
     .map(r => String(r).toLowerCase().trim())
-    .filter(Boolean);
+    .filter(r => Boolean(r) && r !== 'all');
 
   const cleanFavs = (Array.isArray(favoriteKeywords) ? favoriteKeywords : [favoriteKeywords])
     .map(f => String(f).toLowerCase().trim())
@@ -128,7 +169,23 @@ export function filterAndSortOffers(offers, options = {}) {
 
   // 1. Filtern
   const filtered = offers.filter(offer => {
-    // Händlerfilter
+    // Strikte Supermarkt-Prüfung (XXXLutz, Möbelhäuser, Baumärkte etc. ausschließen)
+    if (strictSupermarketOnly && !isGenuineSupermarket(offer.retailer)) {
+      return false;
+    }
+
+    // Aktive Händlerauswahl (AP 2: Supermärkte aktivieren / deaktivieren)
+    if (Array.isArray(allowedRetailers) && allowedRetailers.length > 0) {
+      const allowedClean = allowedRetailers.map(r => String(r).toLowerCase().trim()).filter(Boolean);
+      const offerRet = (offer.retailer || '').toLowerCase();
+      const offerSlug = (offer.retailerSlug || '').toLowerCase();
+      const isAllowed = allowedClean.some(
+        al => offerRet.includes(al) || offerSlug.includes(al) || al.includes(offerRet)
+      );
+      if (!isAllowed) return false;
+    }
+
+    // Händlerfilter (explizite Auswahl)
     if (retailerFilters.length > 0) {
       const offerRetailer = (offer.retailer || '').toLowerCase();
       const offerSlug = (offer.retailerSlug || '').toLowerCase();
@@ -184,13 +241,6 @@ export function filterAndSortOffers(offers, options = {}) {
       return false;
     }
 
-    // Mindestrabatt
-    if (typeof minDiscount === 'number') {
-      if (!offer.discountPercent || offer.discountPercent < minDiscount) {
-        return false;
-      }
-    }
-
     return true;
   });
 
@@ -242,8 +292,16 @@ export function filterAndSortOffers(offers, options = {}) {
     };
   });
 
+  // Optional: Nach Mindestrabatt filtern (nachdem alle Rabatte finalisiert wurden)
+  let resultOffers = enriched;
+  if (typeof minDiscount === 'number' && minDiscount > 0) {
+    resultOffers = resultOffers.filter(offer => {
+      return typeof offer.discountPercent === 'number' && offer.discountPercent >= minDiscount;
+    });
+  }
+
   // 3. Sortieren
-  return enriched.sort((a, b) => {
+  return resultOffers.sort((a, b) => {
     switch (sortBy) {
       case 'refPrice': {
         // Primär nach standardisiertem Grundpreis sortieren
@@ -276,6 +334,12 @@ export function filterAndSortOffers(offers, options = {}) {
 
       case 'title':
         return (a.title || '').localeCompare(b.title || '', 'de');
+
+      case 'retailer': {
+        const retComp = (a.retailer || '').localeCompare(b.retailer || '', 'de');
+        if (retComp !== 0) return retComp;
+        return a.price - b.price;
+      }
 
       default:
         return 0;
