@@ -48,9 +48,17 @@
           </button>
         </div>
 
+        <!-- Meine Märkte Button -->
+        <button id="openStoresBtn" class="btn-icon-labeled" title="Supermärkte aktivieren oder deaktivieren">
+          <span class="stores-icon">🏪</span>
+          <span class="stores-label">Meine Märkte</span>
+          <span id="storesCountBadge" class="fav-count-badge">8</span>
+        </button>
+
         <!-- Favoriten Button -->
-        <button id="favQuickBtn" class="btn-icon-labeled" title="Favoriten-Filter aktivieren">
+        <button id="openFavHubBtn" class="btn-icon-labeled" title="Favoriten-Manager & Produkt-Radar öffnen">
           <span class="star-icon">⭐</span>
+          <span class="fav-label">Favoriten</span>
           <span class="fav-count-badge" id="favCountBadge">0</span>
         </button>
 
@@ -161,6 +169,15 @@
           </select>
         </div>
 
+        <!-- Discount Threshold Chips -->
+        <div class="discount-chips-group" title="Angebote nach Mindestrabatt filtern">
+          <span class="discount-label">🔥 Rabatt:</span>
+          <button type="button" class="chip-discount active" data-min-discount="0">Alle</button>
+          <button type="button" class="chip-discount" data-min-discount="20">Ab -20%</button>
+          <button type="button" class="chip-discount" data-min-discount="30">Ab -30% 🔥</button>
+          <button type="button" class="chip-discount" data-min-discount="50">Ab -50% 💥</button>
+        </div>
+
         <!-- Special Filter Tag Buttons -->
         <div class="special-tags-group">
           <button id="toggleFoodFilterBtn" class="filter-chip-toggle" data-filter="food">
@@ -215,17 +232,7 @@
       <!-- Retailer Filters Bar -->
       <div class="retailer-bar">
         <span class="retailer-bar-label">Märkte:</span>
-        <div class="retailer-chips" id="retailerChipsContainer">
-          <button class="chip-retailer active" data-retailer="all">Alle Märkte</button>
-          <button class="chip-retailer" data-retailer="Aldi Nord">Aldi Nord</button>
-          <button class="chip-retailer" data-retailer="Lidl">Lidl</button>
-          <button class="chip-retailer" data-retailer="REWE">REWE</button>
-          <button class="chip-retailer" data-retailer="Norma">Norma</button>
-          <button class="chip-retailer" data-retailer="Kaufland">Kaufland</button>
-          <button class="chip-retailer" data-retailer="Edeka">Edeka</button>
-          <button class="chip-retailer" data-retailer="Penny">Penny</button>
-          <button class="chip-retailer" data-retailer="Netto">Netto</button>
-        </div>
+        <div class="retailer-chips" id="retailerChipsContainer"></div>
       </div>
     </section>
 
@@ -278,12 +285,12 @@
           <thead>
             <tr>
               <th>Favorit</th>
-              <th>Produkt</th>
-              <th>Händler</th>
-              <th>Ladenpreis</th>
-              <th class="th-highlight">Grundpreis</th>
-              <th>Tags</th>
-              <th>Gültig bis</th>
+              <th class="th-sortable" data-sort="title" title="Nach Produktname sortieren">Produkt <span class="sort-icon" id="sortIcon-title">⇅</span></th>
+              <th class="th-sortable" data-sort="retailer" title="Nach Supermarkt sortieren">Händler <span class="sort-icon" id="sortIcon-retailer">⇅</span></th>
+              <th class="th-sortable" data-sort="price" title="Nach Ladenpreis sortieren">Ladenpreis <span class="sort-icon" id="sortIcon-price">⇅</span></th>
+              <th class="th-sortable th-highlight" data-sort="refPrice" title="Nach Grundpreis sortieren">Grundpreis <span class="sort-icon" id="sortIcon-refPrice">▲</span></th>
+              <th class="th-sortable" data-sort="discount" title="Nach Rabattprozent sortieren">Rabatt <span class="sort-icon" id="sortIcon-discount">⇅</span></th>
+              <th class="th-sortable" data-sort="validTo" title="Nach Gültigkeitsdauer sortieren">Gültig bis <span class="sort-icon" id="sortIcon-validTo">⇅</span></th>
               <th>Aktion</th>
             </tr>
           </thead>
@@ -297,6 +304,8 @@
 
   <!-- Slide-Over Shopping Basket Drawer (Gruppiert nach Supermarkt) -->
   <aside id="basketDrawer" class="basket-drawer" aria-hidden="true">
+    <!-- Desktop Resize Handle (Ziehen zum Anpassen der Breite) -->
+    <div id="drawerResizeHandle" class="drawer-resize-handle" title="Breite per Drag anpassen"></div>
     <div class="drawer-header">
       <div class="drawer-title-group">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -385,15 +394,45 @@
         <div class="optimize-info">
           <span>Smarte Analyse für PLZ <strong id="basketPlzDisplay">10115</strong></span>
         </div>
-        <button id="optimizeBasketBtn" class="btn-optimize">
-          <span class="icon-sparkle">⚡</span>
-          <span>Einkauf jetzt optimieren</span>
-        </button>
+        <div class="optimize-buttons-row">
+          <button id="optimizeBasketBtn" class="btn-optimize">
+            <span class="icon-sparkle">⚡</span>
+            <span>Einkauf jetzt optimieren</span>
+          </button>
+          <button type="button" id="insertFavsToOptBtn" class="btn-opt-favs" title="Alle Favoriten in die Optimierung einfügen">
+            <span>⭐ Favoriten einfügen</span>
+          </button>
+        </div>
       </div>
 
-      <!-- Optimization Results Container -->
+      <!-- Optimization Results Container (Direkt unter dem Button) -->
       <div id="optimizationResultContainer" class="optimization-result-box" style="display: none;">
         <!-- Rendered via JavaScript -->
+      </div>
+
+      <!-- Recipe / Chefkoch Import Box (Minimierbar & Mehrfach-Rezepte) -->
+      <div class="recipe-import-card" id="recipeImportCard">
+        <div class="recipe-import-header" id="recipeHeaderToggle" title="Klicken zum Ein- / Ausklappen">
+          <div class="recipe-header-title-box">
+            <span class="recipe-icon">🍳</span>
+            <div class="recipe-header-text">
+              <div class="recipe-header-top-line">
+                <strong>Chefkoch-Rezept importieren</strong>
+                <span id="recipeCountBadge" class="recipe-imported-count-pill" style="display:none;">0 aktiv</span>
+              </div>
+              <small id="recipeHeaderSubtitle">Chefkoch-Link einfügen (mehrere Rezepte nacheinander möglich)</small>
+            </div>
+          </div>
+          <button type="button" id="btnToggleRecipeCard" class="btn-toggle-recipe" title="Ein- / Ausklappen">▼</button>
+        </div>
+        <div id="recipeImportBody" class="recipe-import-body">
+          <div class="recipe-input-row">
+            <input type="text" id="recipeUrlInput" placeholder="Chefkoch-Link (z. B. chefkoch.de/rezepte/...)..." />
+            <button type="button" id="recipeParseBtn" class="btn-recipe-parse">Laden</button>
+          </div>
+          <div id="recipeParseSpinner" class="spinner" style="display:none; width:20px; height:20px; margin:0.5rem auto;"></div>
+          <div id="recipeResultPreview" class="recipe-result-preview" style="display:none;"></div>
+        </div>
       </div>
 
       <!-- Zusätzlicher Zurück-Button am Ende der Liste für Mobile -->
@@ -611,12 +650,87 @@
     </div>
   </div>
 
+  <!-- Modal 1: Meine Supermärkte (Aktivieren / Deaktivieren) -->
+  <div id="storesModal" class="modal-backdrop" style="display: none;" aria-hidden="true">
+    <div class="modal-card stores-modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span style="font-size: 1.3rem;">🏪</span>
+          <h3 class="modal-title">Meine Supermärkte</h3>
+        </div>
+        <button type="button" id="closeStoresModalBtn" class="btn-modal-close" title="Schließen">✕</button>
+      </div>
+      <div class="stores-modal-body">
+        <p class="modal-intro-text">
+          Wähle die Geschäfte aus, die für deinen Einkauf in Frage kommen. Angebote anderer Märkte werden ausgeblendet und im Optimierer ignoriert.
+        </p>
+        <div class="stores-bulk-actions">
+          <button type="button" id="selectAllStoresBtn" class="btn-stores-quick">Alle aktivieren</button>
+          <button type="button" id="selectDiscStoresBtn" class="btn-stores-quick">Nur Discounter</button>
+        </div>
+        <div id="storesCheckboxList" class="stores-checkbox-grid">
+          <!-- Rendered via JavaScript -->
+        </div>
+        <button type="button" id="saveStoresBtn" class="btn-stores-save">
+          <span>Auswahl speichern</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 2: Favoriten-Manager (Konkrete & Generische Favoriten) -->
+  <div id="favHubModal" class="modal-backdrop" style="display: none;" aria-hidden="true">
+    <div class="modal-card fav-modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span style="font-size: 1.3rem;">⭐</span>
+          <h3 class="modal-title">Favoriten-Manager</h3>
+        </div>
+        <button type="button" id="closeFavHubModalBtn" class="btn-modal-close" title="Schließen">✕</button>
+      </div>
+      <div class="fav-modal-body">
+        <p class="modal-intro-text">
+          Verwalte deine Lieblingsartikel oder trage allgemeine Produkte ein (z. B. <em>Bio Eier</em>, <em>Olivenöl</em>, <em>Kaffee</em>). Unser Radar schlägt automatisch an, wenn es passende Deals gibt!
+        </p>
+        <form id="addGenericFavForm" class="fav-add-form">
+          <input type="text" id="genericFavInput" placeholder="Neues Lieblingsprodukt (z.B. Bio Eier, Olivenöl...)" required />
+          <button type="submit" class="btn-add-fav">➕ Hinzufügen</button>
+        </form>
+        <div id="favListContainer" class="fav-items-list">
+          <!-- Rendered via JavaScript -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 3: Günstigere Alternative Vergleichen & Tauschen (Deal-Swap) -->
+  <div id="dealSwapModal" class="modal-backdrop" style="display: none;" aria-hidden="true">
+    <div class="modal-card swap-modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span style="font-size: 1.3rem;">💡</span>
+          <h3 class="modal-title">Günstigere Alternative gefunden!</h3>
+        </div>
+        <button type="button" id="closeDealSwapModalBtn" class="btn-modal-close" title="Schließen">✕</button>
+      </div>
+      <div class="swap-modal-body">
+        <div id="swapCurrentItemBox" class="swap-current-item">
+          <!-- Rendered via JavaScript -->
+        </div>
+        <h4 class="swap-alternatives-heading">Verfügbare Alternativen bei deinen Supermärkten:</h4>
+        <div id="swapAlternativesList" class="swap-alternatives-grid">
+          <!-- Rendered via JavaScript -->
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Overlay Backdrop -->
   <div id="drawerBackdrop" class="drawer-backdrop"></div>
 
   <!-- Notification Toast -->
   <div id="toast" class="toast"></div>
 
-  <script src="app.js?v=2.2"></script>
+  <script src="app.js?v=2.3"></script>
 </body>
 </html>

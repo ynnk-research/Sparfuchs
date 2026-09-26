@@ -33,6 +33,12 @@ const state = {
   isLoading: false,
   activeShareUrl: '',
   incomingSharedBasket: null,
+  // Update v2.0 State
+  minDiscount: 0,
+  activeStores: JSON.parse(localStorage.getItem('sparfuchs_active_stores') || '[]'),
+  tableSort: { key: 'refPrice', dir: 'asc' },
+  dealSwapTargetItem: null,
+  recipeIngredients: [],
 };
 
 /**
@@ -156,6 +162,35 @@ const elements = {
   importItemsPreview: document.getElementById('importItemsPreview'),
   confirmImportAppendBtn: document.getElementById('confirmImportAppendBtn'),
   confirmImportReplaceBtn: document.getElementById('confirmImportReplaceBtn'),
+  // Update v2.0 DOM Elements
+  openStoresBtn: document.getElementById('openStoresBtn'),
+  storesCountBadge: document.getElementById('storesCountBadge'),
+  storesModal: document.getElementById('storesModal'),
+  closeStoresModalBtn: document.getElementById('closeStoresModalBtn'),
+  storesCheckboxList: document.getElementById('storesCheckboxList'),
+  selectAllStoresBtn: document.getElementById('selectAllStoresBtn'),
+  selectDiscStoresBtn: document.getElementById('selectDiscStoresBtn'),
+  saveStoresBtn: document.getElementById('saveStoresBtn'),
+  openFavHubBtn: document.getElementById('openFavHubBtn'),
+  favHubModal: document.getElementById('favHubModal'),
+  closeFavHubModalBtn: document.getElementById('closeFavHubModalBtn'),
+  addGenericFavForm: document.getElementById('addGenericFavForm'),
+  genericFavInput: document.getElementById('genericFavInput'),
+  favListContainer: document.getElementById('favListContainer'),
+  dealSwapModal: document.getElementById('dealSwapModal'),
+  closeDealSwapModalBtn: document.getElementById('closeDealSwapModalBtn'),
+  swapCurrentItemBox: document.getElementById('swapCurrentItemBox'),
+  swapAlternativesList: document.getElementById('swapAlternativesList'),
+  insertFavsToOptBtn: document.getElementById('insertFavsToOptBtn'),
+  recipeUrlInput: document.getElementById('recipeUrlInput'),
+  recipeParseBtn: document.getElementById('recipeParseBtn'),
+  recipeParseSpinner: document.getElementById('recipeParseSpinner'),
+  recipeResultPreview: document.getElementById('recipeResultPreview'),
+  drawerResizeHandle: document.getElementById('drawerResizeHandle'),
+  recipeImportCard: document.getElementById('recipeImportCard'),
+  recipeHeaderToggle: document.getElementById('recipeHeaderToggle'),
+  btnToggleRecipeCard: document.getElementById('btnToggleRecipeCard'),
+  recipeCountBadge: document.getElementById('recipeCountBadge'),
 };
 
 /**
@@ -295,6 +330,14 @@ async function fetchOffers() {
       params.append('retailers', state.retailer);
     }
 
+    if (state.minDiscount && state.minDiscount > 0) {
+      params.append('minDiscount', String(state.minDiscount));
+    }
+
+    if (Array.isArray(state.activeStores) && state.activeStores.length > 0) {
+      params.append('activeRetailers', state.activeStores.join(','));
+    }
+
     const response = await fetch(`/api/offers?${params.toString()}`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
@@ -360,12 +403,14 @@ function renderOffers(offers) {
     }
   });
 
-  // 1. Grid Cards erstellen
+  // 1. Grid Cards
   const gridHtml = offers.map(offer => {
     const isBestRef = (offer.referencePrice && offer.referencePrice === minRefPrice);
     const validToStr = formatShortDate(offer.validTo);
     const fallbackImage = `https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80`;
-    const favActive = isFavorite(offer.title, offer.brand);
+    const cleanTitle = (offer.title || '').replace(/\bthisisnobrand123\b/gi, '').trim();
+    const cleanBrand = offer.brand ? (offer.brand.toLowerCase() === 'thisisnobrand123' ? 'Eigenmarke' : offer.brand) : '';
+    const favActive = isFavorite(cleanTitle, cleanBrand);
 
     return `
       <div class="offer-card ${isBestRef ? 'best-ref-price' : ''}" data-id="${offer.id}">
@@ -373,7 +418,7 @@ function renderOffers(offers) {
           <span class="badge-retailer" data-retailer="${offer.retailer}">${offer.retailer}</span>
           
           <!-- Favorite Star Button -->
-          <button class="btn-card-fav ${favActive ? 'favorited' : ''}" title="Zu Favoriten hinzufügen" data-title="${offer.title.replace(/"/g, '&quot;')}">
+          <button class="btn-card-fav ${favActive ? 'favorited' : ''}" title="Zu Favoriten hinzufügen" data-title="${cleanTitle.replace(/"/g, '&quot;')}">
             ⭐
           </button>
 
@@ -389,15 +434,15 @@ function renderOffers(offers) {
           <img 
             class="card-image" 
             src="${offer.imageUrl || fallbackImage}" 
-            alt="${offer.title}" 
+            alt="${cleanTitle}" 
             loading="lazy"
             onerror="this.src='${fallbackImage}'"
           >
         </div>
         
         <div class="card-body">
-          ${offer.brand ? `<div class="card-brand">${offer.brand}</div>` : ''}
-          <h3 class="card-title" title="${offer.title}">${offer.title}</h3>
+          ${cleanBrand ? `<div class="card-brand">${cleanBrand}</div>` : ''}
+          <h3 class="card-title" title="${cleanTitle}">${cleanTitle}</h3>
           <p class="card-desc" title="${offer.description}">${offer.description || offer.packageSize || ''}</p>
           
           <div class="card-pricing">
@@ -437,13 +482,14 @@ function renderOffers(offers) {
 
             <button class="btn-card-add" 
               data-id="${offer.id}"
-              data-title="${offer.title.replace(/"/g, '&quot;')}"
+              data-title="${cleanTitle.replace(/"/g, '&quot;')}"
               data-retailer="${offer.retailer.replace(/"/g, '&quot;')}"
               data-price="${offer.price}"
               data-formatted-price="${offer.formattedPrice}"
               data-old-price="${offer.oldPrice || ''}"
               data-formatted-old-price="${offer.formattedOldPrice || ''}"
-              data-estimated-old-price="${offer.isEstimatedOldPrice ? 'true' : 'false'}">
+              data-estimated-old-price="${offer.isEstimatedOldPrice ? 'true' : 'false'}"
+              data-image-url="${offer.imageUrl || ''}">
               <span>➕ Auf Einkaufsliste (${offer.retailer})</span>
             </button>
           </div>
@@ -459,21 +505,23 @@ function renderOffers(offers) {
     const isBestRef = (offer.referencePrice && offer.referencePrice === minRefPrice);
     const validToStr = formatShortDate(offer.validTo);
     const fallbackImage = `https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=100&q=80`;
-    const favActive = isFavorite(offer.title, offer.brand);
+    const cleanTitle = (offer.title || '').replace(/\bthisisnobrand123\b/gi, '').trim();
+    const cleanBrand = offer.brand ? (offer.brand.toLowerCase() === 'thisisnobrand123' ? 'Eigenmarke' : offer.brand) : '';
+    const favActive = isFavorite(cleanTitle, cleanBrand);
 
     return `
       <tr>
         <td>
-          <button class="btn-table-fav ${favActive ? 'favorited' : ''}" data-title="${offer.title.replace(/"/g, '&quot;')}">
+          <button class="btn-table-fav ${favActive ? 'favorited' : ''}" data-title="${cleanTitle.replace(/"/g, '&quot;')}">
             ⭐
           </button>
         </td>
         <td>
           <div class="table-product-cell">
-            <img class="table-img" src="${offer.imageUrl || fallbackImage}" alt="${offer.title}" onerror="this.src='${fallbackImage}'">
+            <img class="table-img" src="${offer.imageUrl || fallbackImage}" alt="${cleanTitle}" onerror="this.src='${fallbackImage}'">
             <div>
-              <div class="table-product-title">${offer.title}</div>
-              <div class="table-product-brand">${offer.brand || offer.packageSize || ''}</div>
+              <div class="table-product-title">${cleanTitle}</div>
+              <div class="table-product-brand">${cleanBrand || offer.packageSize || ''}</div>
             </div>
           </div>
         </td>
@@ -505,13 +553,14 @@ function renderOffers(offers) {
         <td>
           <button class="btn-card-add" style="margin:0; padding:0.4rem 0.7rem;" 
             data-id="${offer.id}"
-            data-title="${offer.title.replace(/"/g, '&quot;')}"
+            data-title="${cleanTitle.replace(/"/g, '&quot;')}"
             data-retailer="${offer.retailer.replace(/"/g, '&quot;')}"
             data-price="${offer.price}"
             data-formatted-price="${offer.formattedPrice}"
             data-old-price="${offer.oldPrice || ''}"
             data-formatted-old-price="${offer.formattedOldPrice || ''}"
-            data-estimated-old-price="${offer.isEstimatedOldPrice ? 'true' : 'false'}">
+            data-estimated-old-price="${offer.isEstimatedOldPrice ? 'true' : 'false'}"
+            data-image-url="${offer.imageUrl || ''}">
             ➕ ${offer.retailer}
           </button>
         </td>
@@ -535,6 +584,7 @@ function renderOffers(offers) {
         oldPrice: (typeof oldPrice === 'number' && !isNaN(oldPrice)) ? oldPrice : null,
         formattedOldPrice: btn.getAttribute('data-formatted-old-price') || null,
         isEstimatedOldPrice: btn.getAttribute('data-estimated-old-price') === 'true',
+        imageUrl: btn.getAttribute('data-image-url') || null,
         checked: false,
       };
       addToBasket(item);
@@ -619,12 +669,14 @@ function addToBasket(itemOrTitle) {
       retailer: 'Einkaufsnotiz (Ohne Festlegung)',
       price: 0,
       formattedPrice: '—',
+      imageUrl: null,
       quantity: 1,
       checked: false,
     };
   } else {
     item = {
       ...itemOrTitle,
+      imageUrl: itemOrTitle.imageUrl || null,
       quantity: (typeof itemOrTitle.quantity === 'number' && itemOrTitle.quantity > 0) ? itemOrTitle.quantity : 1,
     };
   }
@@ -838,44 +890,74 @@ function renderBasket() {
             const lineTotal = (it.price > 0) ? (it.price * qty) : 0;
             const lineTotalFormatted = lineTotal > 0 ? `${lineTotal.toFixed(2).replace('.', ',')} €` : '—';
             const unitPriceFormatted = it.formattedPrice || (it.price > 0 ? `${it.price.toFixed(2).replace('.', ',')} €` : '');
+            const cleanTitle = (it.title || '').replace(/\bthisisnobrand123\b/gi, '').trim();
+            const betterDeal = findBetterDeal(it);
 
             return `
-              <div class="basket-item-row ${it.checked ? 'checked' : ''}" data-id="${it.id}">
-                <div class="basket-item-left">
-                  <input 
-                    type="checkbox" 
-                    class="basket-checkbox" 
-                    data-id="${it.id}" 
-                    ${it.checked ? 'checked' : ''}
-                    title="Als erledigt abhaken"
-                  >
-                  <div class="basket-qty-control" title="Stückzahl anpassen">
-                    <button type="button" class="btn-qty btn-qty-minus" data-id="${it.id}" title="1 weniger">−</button>
-                    <span class="qty-num">${qty}</span>
-                    <button type="button" class="btn-qty btn-qty-plus" data-id="${it.id}" title="1 mehr">+</button>
+              <div class="basket-item-wrapper" data-id="${it.id}">
+                <div class="basket-item-row ${it.checked ? 'checked' : ''}" data-id="${it.id}">
+                  <div class="basket-item-left">
+                    <input 
+                      type="checkbox" 
+                      class="basket-checkbox" 
+                      data-id="${it.id}" 
+                      ${it.checked ? 'checked' : ''}
+                      title="Als erledigt abhaken"
+                    >
+                    <div class="basket-item-thumb-col">
+                      ${it.imageUrl ? `
+                        <img class="basket-item-img" src="${it.imageUrl}" alt="${cleanTitle.replace(/"/g, '&quot;')}" onerror="this.style.display='none';">
+                      ` : `
+                        <div class="basket-item-img-placeholder">🛒</div>
+                      `}
+                      <div class="basket-qty-control" title="Stückzahl anpassen">
+                        <button type="button" class="btn-qty btn-qty-minus" data-id="${it.id}" title="1 weniger">−</button>
+                        <span class="qty-num">${qty}</span>
+                        <button type="button" class="btn-qty btn-qty-plus" data-id="${it.id}" title="1 mehr">+</button>
+                      </div>
+                    </div>
+                    <div class="basket-item-info">
+                      <span class="basket-item-name">${cleanTitle}</span>
+                      ${qty > 1 && it.price > 0 ? `
+                        <div class="basket-item-single-calc">${qty} × ${unitPriceFormatted}</div>
+                      ` : ''}
+                      ${itemTotalSavings > 0 ? `
+                        <div class="basket-item-subprice">
+                          <span class="basket-item-statt">statt ${(oldPriceVal * qty).toFixed(2).replace('.', ',')} €</span>
+                          <span class="basket-item-saving">Du sparst ${itemTotalSavings.toFixed(2).replace('.', ',')} €</span>
+                        </div>
+                      ` : ''}
+                    </div>
                   </div>
-                  <div class="basket-item-info">
-                    <span class="basket-item-name">${it.title}</span>
-                    ${qty > 1 && it.price > 0 ? `
-                      <div class="basket-item-single-calc">${qty} × ${unitPriceFormatted}</div>
-                    ` : ''}
-                    ${itemTotalSavings > 0 ? `
-                      <div class="basket-item-subprice">
-                        <span class="basket-item-statt">statt ${(oldPriceVal * qty).toFixed(2).replace('.', ',')} €</span>
-                        <span class="basket-item-saving">Du sparst ${itemTotalSavings.toFixed(2).replace('.', ',')} €</span>
+                  <div class="basket-item-right">
+                    ${it.price > 0 ? `
+                      <div class="basket-item-price-col">
+                        <span class="basket-item-price">${lineTotalFormatted}</span>
+                        ${itemDiscountPct ? `<span class="basket-item-discount-pill">-${itemDiscountPct}%</span>` : ''}
                       </div>
                     ` : ''}
+                    <button class="btn-item-del" data-id="${it.id}" title="Entfernen">✕</button>
                   </div>
                 </div>
-                <div class="basket-item-right">
-                  ${it.price > 0 ? `
-                    <div class="basket-item-price-col">
-                      <span class="basket-item-price">${lineTotalFormatted}</span>
-                      ${itemDiscountPct ? `<span class="basket-item-discount-pill">-${itemDiscountPct}%</span>` : ''}
+
+                ${it.previousState ? `
+                  <div class="basket-swapped-notice">
+                    <span>✅ Getauscht von <em>${it.previousState.title} (${it.previousState.retailer})</em></span>
+                    <button type="button" class="btn-undo-swap" data-id="${it.id}" title="Ursprünglichen Artikel wiederherstellen">
+                      ↩️ Rückgängig
+                    </button>
+                  </div>
+                ` : (betterDeal ? `
+                  <div class="basket-deal-swap-alert">
+                    <div class="deal-swap-alert-text">
+                      💡 <strong>Günstiger bei ${betterDeal.retailer}:</strong> ${betterDeal.title} für <strong>${betterDeal.formattedPrice}</strong>
+                      ${betterDeal.formattedSavingsVsItem ? `<span class="deal-swap-saving">(Ersparnis: ${betterDeal.formattedSavingsVsItem})</span>` : ''}
                     </div>
-                  ` : ''}
-                  <button class="btn-item-del" data-id="${it.id}" title="Entfernen">✕</button>
-                </div>
+                    <button type="button" class="btn-swap-deal" data-target-id="${it.id}" data-deal-id="${betterDeal.id}" title="Direkt gegen dieses Angebot austauschen">
+                      🔄 Tauschen
+                    </button>
+                  </div>
+                ` : '')}
               </div>
             `;
           }).join('')}
@@ -932,12 +1014,33 @@ function renderBasket() {
     });
   });
 
+  // Event Listener für Direkt-Deal-Swap Tauschen-Button
+  elements.basketGroupedContainer.querySelectorAll('.btn-swap-deal').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const targetId = btn.getAttribute('data-target-id');
+      const dealId = btn.getAttribute('data-deal-id');
+      applyDirectDealSwap(targetId, dealId);
+    });
+  });
+
+  // Event Listener für Tausch-Rückgängig-Button
+  elements.basketGroupedContainer.querySelectorAll('.btn-undo-swap').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-id');
+      undoDealSwap(id);
+    });
+  });
+
   // Mobile-Optimierung: Tippen auf die gesamte Zeile hakt den Artikel ab (außer Buttons & Checkbox)
   elements.basketGroupedContainer.querySelectorAll('.basket-item-row').forEach(row => {
     row.addEventListener('click', (e) => {
       if (
         e.target.closest('.btn-item-del') ||
         e.target.closest('.basket-qty-control') ||
+        e.target.closest('.btn-swap-deal') ||
+        e.target.closest('.btn-undo-swap') ||
         e.target.classList.contains('basket-checkbox')
       ) return;
       const id = row.getAttribute('data-id');
@@ -1364,6 +1467,7 @@ function updateFavoritesRadar(offers) {
           data-old-price="${sanitizedOld || ''}"
           data-formatted-old-price="${oldPriceFormatted}"
           data-estimated-old-price="${deal.isEstimatedOldPrice ? 'true' : 'false'}"
+          data-image-url="${deal.imageUrl || ''}"
         >
           ➕ Auf Einkaufsliste
         </button>
@@ -1388,12 +1492,40 @@ function updateFavoritesRadar(offers) {
         oldPrice: (typeof oldPrice === 'number' && !isNaN(oldPrice)) ? oldPrice : null,
         formattedOldPrice: btn.getAttribute('data-formatted-old-price') || null,
         isEstimatedOldPrice: btn.getAttribute('data-estimated-old-price') === 'true',
+        imageUrl: btn.getAttribute('data-image-url') || null,
         quantity: 1,
         checked: false,
       };
       addToBasket(item);
     });
   });
+}
+
+/**
+ * Bereinigt Notiz-Einträge für die Supermarkt-Suche (entfernt z. B. "zum Anbraten", "fein gewürfelt")
+ */
+function cleanShoppingItemForSearch(raw) {
+  if (!raw) return '';
+  let clean = String(raw).trim();
+  clean = clean.replace(/^(\d+[.,]\d+|\d+)\s*(g|kg|ml|l|liter|el|tl|bund|dose|dosen|packung|pkg|stk|stück)?\s*/i, '');
+  const prepPhrases = [
+    /\b(zum|beim|fürs?|nach|aus|vom|im|in)\s+(anbraten|braten|kochen|backen|frittieren|grillen|verfeinern|servieren|garnieren|belieben|geschmack|bedarf|form|pfanne|topf)\b/gi,
+    /\b(fein|grob|frisch|gehackt|gewürfelt|gerieben|gemahlen|geschnitten|zerlassen|flüssig|kalt|warm|trocken)\b/gi,
+    /\b(etwas|ca\.?|circa|evtl\.?|eventuell|optional|nach bedarf|nach belieben)\b/gi,
+    /\b(für die form|in der pfanne|im ofen|aus der dose)\b/gi,
+  ];
+  for (const pattern of prepPhrases) {
+    clean = clean.replace(pattern, ' ');
+  }
+  clean = clean.replace(/[,;.:\-_/]/g, ' ').replace(/\s+/g, ' ').trim();
+  const lower = clean.toLowerCase();
+  if (lower === 'öl' || lower.includes('speiseöl') || lower.includes('pflanzenöl') || lower.includes('bratöl')) {
+    return 'Öl';
+  }
+  if (lower.includes('olivenöl')) {
+    return 'Olivenöl';
+  }
+  return clean || raw;
 }
 
 /**
@@ -1405,7 +1537,7 @@ async function optimizeBasket() {
     return;
   }
 
-  const itemNames = state.basket.map(i => i.title);
+  const itemNames = state.basket.map(i => cleanShoppingItemForSearch(i.title) || i.title);
 
   elements.optimizeBasketBtn.disabled = true;
   elements.optimizeBasketBtn.innerHTML = `
@@ -1422,6 +1554,7 @@ async function optimizeBasket() {
         zipCode: state.zip,
         excludeAppOnly: state.excludeAppOnly,
         preferReferencePrice: state.sortBy === 'refPrice',
+        activeRetailers: (Array.isArray(state.activeStores) && state.activeStores.length > 0) ? state.activeStores : undefined,
       }),
     });
 
@@ -1442,95 +1575,1047 @@ async function optimizeBasket() {
 }
 
 /**
- * Rendert die Ergebnisse des Optimierers im Drawer
+ * Hilfsfunktionen zur Bereinigung von Produkttiteln und Marken
+ */
+function cleanProductTitle(title) {
+  if (!title) return '';
+  return title
+    .replace(/\bthisisnobrand123\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function cleanBrandName(brand) {
+  if (!brand) return '';
+  if (brand.toLowerCase().includes('thisisnobrand123')) return 'Eigenmarke';
+  return brand.trim();
+}
+
+/**
+ * Rendert die Ergebnisse des Optimierers im Drawer direkt unter dem Button mit
+ * echter Produktanzeige, Supermarkt-Tag, 3 besten Alternativen und Auswahl-Checkboxen.
  */
 function renderOptimizationResult(opt) {
   if (!opt) return;
 
   const container = elements.optimizationResultContainer;
+  if (!container) return;
   container.style.display = 'flex';
 
   const champion = opt.singleStoreChampion;
   const split = opt.smartSplit;
-  const splitSavings = opt.splitSavingsVsSingle;
+  const bestPerItem = opt.bestPerItem || [];
+  const splitSavings = opt.splitSavingsVsSingle || 0;
 
-  let html = '';
+  // Bestimme den primär empfohlenen Plan ('split' oder 'champion' oder 'best') - Smart Split ist Standard
+  const hasSplit = split && split.stores && split.stores.length === 2;
+  let activePlan = hasSplit ? 'split' : (champion ? 'champion' : (bestPerItem.length > 0 ? 'best' : null));
 
-  // 1. Single-Store Champion
-  if (champion) {
-    html += `
-      <div class="card-champion">
-        <div class="champion-header">
-          <span class="champion-title">🏆 Single-Store Sieger</span>
-          <span class="savings-tag">${champion.matchedCount}/${opt.totalItemsRequested} Treffer</span>
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:baseline;">
-          <div class="champion-store">${champion.retailer}</div>
-          <div class="champion-price">${champion.totalPrice.toFixed(2).replace('.', ',')} €</div>
-        </div>
-        <p style="font-size:0.8rem; color:var(--text-dim); margin-top:0.3rem;">
-          Wenn du nur in einen einzigen Laden möchtest.
-        </p>
-      </div>
-    `;
+  // Wir halten eine lokale Kopie der Plan-Items für den interaktiven Deal-Tausch (Alternativen)
+  const planItemsCache = {};
+
+  function getPlanItems(plan) {
+    if (planItemsCache[plan]) {
+      return planItemsCache[plan];
+    }
+
+    let items = [];
+    if (plan === 'split' && hasSplit) {
+      const [sA, sB] = split.stores;
+      const allocA = (split.allocations && split.allocations[sA]) ? split.allocations[sA].items : [];
+      const allocB = (split.allocations && split.allocations[sB]) ? split.allocations[sB].items : [];
+      const primaryItems = [...allocA, ...allocB].filter(it => it && it.offer);
+
+      // Ergänzungen aus weiteren Supermärkten für Artikel, die in den 2 Läden fehlen
+      const additionalItems = (split.otherStoreMatches || []).map(it => ({
+        ...it,
+        isAdditionalStore: true,
+      }));
+
+      items = [...primaryItems, ...additionalItems];
+    } else if (plan === 'champion' && champion) {
+      items = (champion.matchedItems || []).filter(it => it && it.offer);
+    } else if (plan === 'best' && bestPerItem.length > 0) {
+      items = bestPerItem.filter(it => it && it.offer);
+    }
+
+    planItemsCache[plan] = items.map(item => ({
+      query: item.query,
+      offer: { ...item.offer },
+      isAdditionalStore: Boolean(item.isAdditionalStore),
+      alternatives: Array.isArray(item.alternatives) ? item.alternatives.map(a => ({ ...a })) : [],
+    }));
+
+    return planItemsCache[plan];
   }
 
-  // 2. Smart Split (2 Läden)
-  if (split && split.stores.length === 2) {
-    const [storeA, storeB] = split.stores;
-    const allocA = split.allocations[storeA];
-    const allocB = split.allocations[storeB];
+  function renderPlanContent() {
+    const items = getPlanItems(activePlan);
 
-    html += `
-      <div class="card-champion" style="border-color: var(--accent-primary);">
-        <div class="champion-header">
-          <span class="champion-title">⚡ Smart Split (2 Läden)</span>
-          ${splitSavings > 0 ? `<span class="savings-tag">+${splitSavings.toFixed(2).replace('.', ',')} € Ersparnis</span>` : ''}
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:baseline;">
-          <div class="champion-store">${storeA} + ${storeB}</div>
-          <div class="champion-price" style="color:var(--accent-primary);">${split.totalPrice.toFixed(2).replace('.', ',')} €</div>
-        </div>
-        <p style="font-size:0.8rem; color:var(--text-muted); margin-top:0.3rem;">
-          Optimale Aufteilung für maximales Sparen:
-        </p>
-
-        <!-- Store A Details -->
-        <div class="split-store-block">
-          <div class="split-store-name">
-            <span>🛒 ${storeA}</span>
-            <span>${allocA.subtotal.toFixed(2).replace('.', ',')} €</span>
-          </div>
-          <ul class="split-item-list">
-            ${allocA.items.map(it => `
-              <li>
-                <span>${it.query}</span>
-                <span><strong>${it.offer.formattedPrice}</strong></span>
-              </li>
-            `).join('')}
-          </ul>
-        </div>
-
-        <!-- Store B Details -->
-        <div class="split-store-block">
-          <div class="split-store-name">
-            <span>🛒 ${storeB}</span>
-            <span>${allocB.subtotal.toFixed(2).replace('.', ',')} €</span>
-          </div>
-          <ul class="split-item-list">
-            ${allocB.items.map(it => `
-              <li>
-                <span>${it.query}</span>
-                <span><strong>${it.offer.formattedPrice}</strong></span>
-              </li>
-            `).join('')}
-          </ul>
-        </div>
+    let html = `
+      <div class="opt-plans-tabs" style="display:flex; gap:0.5rem; margin-bottom:0.75rem; flex-wrap:wrap;">
+        ${hasSplit ? `
+          <button type="button" class="btn-plan-tab ${activePlan === 'split' ? 'active' : ''}" data-plan="split" style="flex:1; min-width:140px; padding:0.6rem 0.5rem; border-radius:var(--radius-sm); border:1px solid ${activePlan === 'split' ? 'var(--accent-primary)' : 'var(--border-subtle)'}; background:${activePlan === 'split' ? 'rgba(0,229,153,0.12)' : 'rgba(255,255,255,0.03)'}; color:${activePlan === 'split' ? 'var(--accent-primary)' : 'var(--text-muted)'}; font-weight:700; font-size:0.8rem; cursor:pointer; text-align:left;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span>⚡ Smart Split (2 Läden)</span>
+              ${splitSavings > 0 ? `<span style="font-size:0.72rem; color:var(--accent-primary); background:rgba(0,229,153,0.18); padding:0.1rem 0.35rem; border-radius:4px;">+${splitSavings.toFixed(2).replace('.', ',')} € Ersparnis</span>` : ''}
+            </div>
+            <div style="font-size:0.85rem; font-weight:700; color:#e2e8f0; margin-top:0.25rem;">
+              🛒 ${split.stores.join(' + ')}
+            </div>
+          </button>
+        ` : ''}
+        ${champion ? `
+          <button type="button" class="btn-plan-tab ${activePlan === 'champion' ? 'active' : ''}" data-plan="champion" style="flex:1; min-width:140px; padding:0.6rem 0.5rem; border-radius:var(--radius-sm); border:1px solid ${activePlan === 'champion' ? 'var(--accent-primary)' : 'var(--border-subtle)'}; background:${activePlan === 'champion' ? 'rgba(0,229,153,0.12)' : 'rgba(255,255,255,0.03)'}; color:${activePlan === 'champion' ? 'var(--accent-primary)' : 'var(--text-muted)'}; font-weight:700; font-size:0.8rem; cursor:pointer; text-align:left;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span>🏆 Single-Store Sieger</span>
+              <span style="font-size:0.72rem; color:var(--text-dim);">${champion.matchedCount}/${opt.totalItemsRequested} Treffer</span>
+            </div>
+            <div style="font-size:0.85rem; font-weight:700; color:#e2e8f0; margin-top:0.25rem;">
+              🛒 ${champion.retailer}
+            </div>
+          </button>
+        ` : ''}
+        ${bestPerItem.length > 0 ? `
+          <button type="button" class="btn-plan-tab ${activePlan === 'best' ? 'active' : ''}" data-plan="best" style="flex:1; min-width:140px; padding:0.6rem 0.5rem; border-radius:var(--radius-sm); border:1px solid ${activePlan === 'best' ? 'var(--accent-primary)' : 'var(--border-subtle)'}; background:${activePlan === 'best' ? 'rgba(0,229,153,0.12)' : 'rgba(255,255,255,0.03)'}; color:${activePlan === 'best' ? 'var(--accent-primary)' : 'var(--text-muted)'}; font-weight:700; font-size:0.8rem; cursor:pointer; text-align:left;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span>🌐 Alle Märkte</span>
+              <span style="font-size:0.72rem; color:var(--text-dim);">${bestPerItem.length}/${opt.totalItemsRequested} Treffer</span>
+            </div>
+            <div style="font-size:0.85rem; font-weight:700; color:#e2e8f0; margin-top:0.25rem;">
+              🛒 Bester Preis je Artikel
+            </div>
+          </button>
+        ` : ''}
       </div>
     `;
+
+    if (items.length === 0) {
+      html += `
+        <div style="color:var(--text-dim); padding:1rem; text-align:center; font-size:0.85rem;">
+          Keine passenden Angebote gefunden.
+        </div>
+      `;
+      container.innerHTML = html;
+      return;
+    }
+
+    html += `
+      <div class="opt-select-header-bar">
+        <span><strong>${items.length} Angebote gefunden</strong> (Auswahl anpassen):</span>
+        <button type="button" class="btn-opt-select-all" id="btnOptToggleAll">Alle abwählen</button>
+      </div>
+
+      <div class="opt-items-selection-box" id="optItemsList">
+        ${items.map((it, idx) => {
+          const off = it.offer;
+          const cleanTitle = cleanProductTitle(off.title);
+          const brandText = cleanBrandName(off.brand);
+          const alts = Array.isArray(it.alternatives) ? it.alternatives : [];
+
+          return `
+            <div class="opt-item-select-row" data-idx="${idx}">
+              <div class="opt-item-main-row">
+                <label class="opt-item-checkbox-label">
+                  <input type="checkbox" class="opt-item-checkbox" data-deal-id="${off.id}" checked>
+                  ${off.imageUrl ? `
+                    <img src="${off.imageUrl}" class="opt-item-thumb" alt="${cleanTitle.replace(/"/g, '&quot;')}" onerror="this.style.display='none';">
+                  ` : `
+                    <div class="opt-item-thumb" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.05);font-size:1.1rem;">🛒</div>
+                  `}
+                  <div class="opt-item-details">
+                    <div class="opt-item-title">${cleanTitle}</div>
+                    <div class="opt-item-sub">
+                      <span class="opt-item-store-tag" data-retailer="${off.retailer}">${off.retailer}</span>
+                      <span>für <em>„${it.query}“</em></span>
+                      ${brandText && brandText !== 'Eigenmarke' ? `<span>• ${brandText}</span>` : ''}
+                    </div>
+                    ${it.isAdditionalStore ? `
+                      <div class="opt-additional-note">🏪 Ergänzung: Gefunden bei ${off.retailer}</div>
+                    ` : ''}
+                  </div>
+                </label>
+                <div class="opt-item-pricing">
+                  <span class="opt-item-price">${off.formattedPrice || (off.price.toFixed(2).replace('.', ',') + ' €')}</span>
+                  ${off.formattedOldPrice ? `<span class="opt-item-old">${off.formattedOldPrice}</span>` : ''}
+                </div>
+              </div>
+
+              ${alts.length > 0 ? `
+                <div class="opt-item-alts-box">
+                  <div class="opt-alts-header">
+                    <span>💡 ${alts.length} Alternative${alts.length > 1 ? 'n' : ''}:</span>
+                    <span style="font-size:0.68rem; color:#64748b;">(Klick zum Tauschen)</span>
+                  </div>
+                  <div class="opt-alts-list">
+                    ${alts.map((alt, altIdx) => {
+                      const altCleanTitle = cleanProductTitle(alt.title);
+                      const altPriceStr = alt.formattedPrice || (alt.price.toFixed(2).replace('.', ',') + ' €');
+                      return `
+                        <button type="button" class="btn-opt-swap-alt" data-item-idx="${idx}" data-alt-idx="${altIdx}" title="Zu ${alt.retailer}: ${altCleanTitle} (${altPriceStr}) wechseln">
+                          <div class="opt-alt-left">
+                            <span class="opt-alt-badge" data-retailer="${alt.retailer}">${alt.retailer}</span>
+                            <span class="opt-alt-name">${altCleanTitle}</span>
+                          </div>
+                          <div class="opt-alt-right">
+                            <span class="opt-alt-price">${altPriceStr}</span>
+                            ${alt.formattedOldPrice ? `<span class="opt-alt-old">${alt.formattedOldPrice}</span>` : ''}
+                            <span class="opt-alt-action">Tauschen ⇄</span>
+                          </div>
+                        </button>
+                      `;
+                    }).join('')}
+                  </div>
+                </div>
+              ` : ''}
+            </div>
+          `;
+        }).join('')}
+      </div>
+
+      <div style="margin-top:0.75rem;">
+        <button type="button" id="applyOptimizedOffersBtn" class="btn-apply-optimized">
+          🛒 Ausgewählte Angebote (${items.length}) in Einkaufszettel übernehmen
+        </button>
+      </div>
+    `;
+
+    container.innerHTML = html;
+
+    // Listener für Plan-Tabs (Switch zwischen Single-Store, Smart Split und Alle Märkte)
+    container.querySelectorAll('.btn-plan-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activePlan = btn.getAttribute('data-plan');
+        renderPlanContent();
+      });
+    });
+
+    // Listener für Deal-Tausch (Top-Alternativen)
+    container.querySelectorAll('.btn-opt-swap-alt').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const itemIdx = parseInt(btn.getAttribute('data-item-idx'), 10);
+        const altIdx = parseInt(btn.getAttribute('data-alt-idx'), 10);
+        const targetItem = items[itemIdx];
+        if (!targetItem || !targetItem.alternatives || !targetItem.alternatives[altIdx]) return;
+
+        const oldOffer = targetItem.offer;
+        const newOffer = targetItem.alternatives[altIdx];
+
+        targetItem.offer = newOffer;
+        targetItem.alternatives[altIdx] = oldOffer;
+
+        renderPlanContent();
+        showToast(`🔄 Getauscht: ${newOffer.retailer} – ${cleanProductTitle(newOffer.title)} (${newOffer.formattedPrice || newOffer.price.toFixed(2).replace('.', ',') + ' €'})`);
+      });
+    });
+
+    // Toggle All Checkboxes
+    const toggleAllBtn = container.querySelector('#btnOptToggleAll');
+    const checkboxes = container.querySelectorAll('.opt-item-checkbox');
+    const applyBtn = container.querySelector('#applyOptimizedOffersBtn');
+
+    function updateApplyButton() {
+      const selected = Array.from(checkboxes).filter(cb => cb.checked);
+      if (applyBtn) {
+        applyBtn.textContent = `🛒 Ausgewählte Angebote (${selected.length}) in Einkaufszettel übernehmen`;
+        applyBtn.disabled = selected.length === 0;
+        applyBtn.style.opacity = selected.length === 0 ? '0.5' : '1';
+      }
+      if (toggleAllBtn) {
+        toggleAllBtn.textContent = selected.length === 0 ? 'Alle auswählen' : 'Alle abwählen';
+      }
+    }
+
+    if (toggleAllBtn) {
+      toggleAllBtn.addEventListener('click', () => {
+        const anyChecked = Array.from(checkboxes).some(cb => cb.checked);
+        checkboxes.forEach(cb => { cb.checked = !anyChecked; });
+        updateApplyButton();
+      });
+    }
+
+    checkboxes.forEach(cb => {
+      cb.addEventListener('change', updateApplyButton);
+    });
+
+    if (applyBtn) {
+      applyBtn.addEventListener('click', () => {
+        const selectedDealIds = new Set(
+          Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.getAttribute('data-deal-id'))
+        );
+        const selectedItems = items.filter(it => it.offer && selectedDealIds.has(it.offer.id));
+        applyOptimizedOffersToBasket(selectedItems);
+      });
+    }
   }
 
-  container.innerHTML = html;
+  renderPlanContent();
+  container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/**
+ * Wendet die vom Optimierer ausgewählten Deals auf den Einkaufszettel an
+ */
+function applyOptimizedOffersToBasket(selectedItems) {
+  if (!selectedItems || selectedItems.length === 0) return;
+
+  let addedCount = 0;
+  selectedItems.forEach(item => {
+    const deal = item.offer;
+    const query = (item.query || '').toLowerCase().trim();
+
+    // Check if an existing basket item can be updated (e.g. manual note or old deal)
+    const existingIdx = state.basket.findIndex(b => {
+      if (b.id === deal.id) return true;
+      const bTitle = (b.title || '').toLowerCase().trim();
+      if (query && (bTitle === query || bTitle.includes(query) || query.includes(bTitle))) return true;
+      const dTitle = (deal.title || '').toLowerCase().trim();
+      return bTitle.includes(dTitle) || dTitle.includes(bTitle);
+    });
+
+    if (existingIdx !== -1) {
+      const currentQty = state.basket[existingIdx].quantity || 1;
+      state.basket[existingIdx] = {
+        id: deal.id,
+        title: cleanProductTitle(deal.title),
+        retailer: deal.retailer,
+        price: deal.price,
+        formattedPrice: deal.formattedPrice,
+        oldPrice: deal.oldPrice || null,
+        formattedOldPrice: deal.formattedOldPrice || null,
+        isEstimatedOldPrice: deal.isEstimatedOldPrice || false,
+        imageUrl: deal.imageUrl || state.basket[existingIdx].imageUrl || null,
+        quantity: currentQty,
+        checked: false,
+      };
+    } else {
+      state.basket.push({
+        id: deal.id,
+        title: cleanProductTitle(deal.title),
+        retailer: deal.retailer,
+        price: deal.price,
+        formattedPrice: deal.formattedPrice,
+        oldPrice: deal.oldPrice || null,
+        formattedOldPrice: deal.formattedOldPrice || null,
+        isEstimatedOldPrice: deal.isEstimatedOldPrice || false,
+        imageUrl: deal.imageUrl || null,
+        quantity: 1,
+        checked: false,
+      });
+    }
+    addedCount++;
+  });
+
+  saveBasket();
+  renderBasket();
+
+  // Schließe und leere die Optimierungs-Vorschlagsliste nach der Übernahme
+  if (elements.optimizationResultContainer) {
+    elements.optimizationResultContainer.style.display = 'none';
+    elements.optimizationResultContainer.innerHTML = '';
+  }
+
+  showToast(`🎉 ${addedCount} ausgewählte Angebote in deine Einkaufsliste übernommen!`);
+}
+
+/**
+ * Fügt alle Favoriten in den Einkaufszettel ein und startet die Optimierung
+ */
+function insertFavoritesToOptimizer() {
+  if (!state.favorites || state.favorites.length === 0) {
+    showToast('⚠️ Du hast noch keine Favoriten gespeichert. Klicke auf ⭐ oder öffne den Favoriten-Manager.');
+    return;
+  }
+
+  let count = 0;
+  state.favorites.forEach(fav => {
+    if (!state.basket.some(b => b.title.toLowerCase() === fav.toLowerCase())) {
+      addToBasket(fav);
+      count++;
+    }
+  });
+
+  showToast(`⭐ ${state.favorites.length} Favoriten im Einkaufszettel bereit! Starte Optimierung...`);
+  optimizeBasket();
+}
+
+/**
+ * Extrahiert signifikante Suchbegriffe aus einem Produkttitel für Ähnlichkeitsvergleiche
+ */
+function extractSignificantKeywords(title) {
+  if (!title) return [];
+  const clean = title.toLowerCase()
+    .replace(/[,\.\(\)\/\-\+]/g, ' ')
+    .replace(/\b(thisisnobrand123|lidl|aldi|nord|süd|rewe|kaufland|edeka|penny|netto|norma|k-classic|gut & günstig|gut und günstig|ja!|milbona|alnatura|bio|frisch|frische|deutsches|speise|feine|echte|unsere|original|premium|deluxe|beste|wahl|und|mit|oder|der|die|das|den|dem|des|ein|eine|einen|von|aus|kg|gramm|liter|ml|packung|beutel|tafel|dose|flasche)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return clean.split(' ').map(w => w.trim()).filter(w => w.length >= 3);
+}
+
+/**
+ * Ausschlussregeln für inkompatible Produkt-Kategorien und Verarbeitungsstufen.
+ * Verhindert gravierende Falsch-Zuordnungen wie frische Rispentomaten vs. passierte Tomaten,
+ * Olivenöl vs. Rapsöl, Butter vs. Kräuterbutter/Erdnussbutter etc.
+ */
+const CONTRADICTORY_MODIFIER_GROUPS = [
+  // 1. Frische Tomaten vs. verarbeitete Tomatenprodukte / Konserven
+  {
+    groupA: ['rispen', 'strauch', 'cherry', 'cocktail', 'roma', 'fleisch', 'snack', 'lose', 'strauchtomaten', 'rispentomaten', 'cherrytomaten', 'cocktailtomaten', 'fleischtomaten', 'salattomaten'],
+    groupB: ['passiert', 'passierte', 'passiertes', 'gehackt', 'gehackte', 'gehacktes', 'geschält', 'geschälte', 'mark', 'püree', 'sauce', 'soße', 'suppe', 'ketchup', 'dose', 'konserve', 'stückig', 'stückige', 'pizza-tomaten'],
+    label: 'Frische Tomaten vs. verarbeitete Tomatenprodukte'
+  },
+  // 2. Verschiedene Ölsorten
+  {
+    groupA: ['olivenöl', 'olive', 'oliven'],
+    groupB: ['sonnenblumenöl', 'rapsöl', 'frittieröl', 'bratöl', 'distelöl', 'leinöl', 'kokosöl', 'sesamöl'],
+    label: 'Verschiedene Ölsorten'
+  },
+  // 3. Butter-Varianten
+  {
+    groupA: ['erdnussbutter', 'peanut', 'erdnusscreme'],
+    groupB: ['markenbutter', 'weidebutter', 'butter', 'süßrahm', 'sauerrahm', 'margarine'],
+    label: 'Erdnussbutter vs. Speisebutter'
+  },
+  {
+    groupA: ['kräuterbutter', 'knoblauchbutter'],
+    groupB: ['markenbutter', 'weidebutter', 'butter', 'süßrahm', 'sauerrahm'],
+    label: 'Kräuterbutter vs. Speisebutter'
+  },
+  // 4. Pflanzendrinks vs. Milch
+  {
+    groupA: ['hafermilch', 'mandelmilch', 'sojadrink', 'haferdrink', 'mandeldrink', 'sojamilch', 'reismilch', 'kokosdrink', 'pflanzendrink'],
+    groupB: ['kuhmilch', 'weidemilch', 'vollmilch', 'frischmilch', 'h-milch', 'alpenmilch'],
+    label: 'Pflanzendrink vs. Kuhmilch'
+  },
+  {
+    groupA: ['buttermilch', 'kefir'],
+    groupB: ['vollmilch', 'frischmilch', 'h-milch', 'weidemilch'],
+    label: 'Buttermilch vs. Milch'
+  },
+  // 5. Backmehl vs. Paniermehl
+  {
+    groupA: ['paniermehl', 'semmelbrösel', 'panade'],
+    groupB: ['weizenmehl', 'dinkelmehl', 'roggenmehl', 'mehl type 405', 'mehl type 550'],
+    label: 'Paniermehl vs. Backmehl'
+  },
+  // 6. Fleischformen
+  {
+    groupA: ['hackfleisch', 'faschiertes', 'hack'],
+    groupB: ['gulasch', 'schnitzel', 'steak', 'filet', 'braten', 'roulade', 'kotelett'],
+    label: 'Hackfleisch vs. Fleischstücke'
+  },
+  // 7. Frische Früchte / Gemüse vs. verarbeitete Produkte
+  {
+    groupA: ['apfel', 'äpfel'],
+    groupB: ['apfelsaft', 'apfelmus', 'apfelmark', 'apfelstrudel', 'apfelessig'],
+    label: 'Frischer Apfel vs. Apfelprodukt'
+  },
+  {
+    groupA: ['kartoffeln', 'speisekartoffeln'],
+    groupB: ['kartoffelsalat', 'kartoffelchips', 'kartoffelpüree', 'pommes', 'kroketten'],
+    label: 'Frische Kartoffeln vs. Kartoffelfertiggericht'
+  },
+  // 8. Speiseöl vs. Fleisch / Fertiggerichte (verhindert z.B. Cevapcici für Öl zum anbraten)
+  {
+    groupA: ['öl', 'olivenöl', 'rapsöl', 'sonnenblumenöl', 'leinöl', 'speiseöl', 'pflanzenöl', 'bratöl'],
+    groupB: ['cevapcici', 'hackfleisch', 'steak', 'schnitzel', 'wurst', 'bratwurst', 'braten', 'fleisch', 'fisch', 'lachs', 'pizza', 'gouda', 'käse', 'chips'],
+    label: 'Speiseöl vs. Fleisch/Fertiggerichte'
+  }
+];
+
+/**
+ * Prüft strikt, ob ein alternatives Angebot tatsächlich als Ersatz für das aktuelle Produkt taugt.
+ */
+function isCompatibleDeal(targetTitle, candidateTitle) {
+  if (!targetTitle || !candidateTitle) return false;
+  const tNorm = targetTitle.toLowerCase();
+  const cNorm = candidateTitle.toLowerCase();
+
+  // 1. Widersprüchliche Gruppen ausschließen
+  for (const rule of CONTRADICTORY_MODIFIER_GROUPS) {
+    const targetInA = rule.groupA.some(w => tNorm.includes(w));
+    const targetInB = rule.groupB.some(w => tNorm.includes(w));
+    const candInA = rule.groupA.some(w => cNorm.includes(w));
+    const candInB = rule.groupB.some(w => cNorm.includes(w));
+
+    if ((targetInA && candInB) || (targetInB && candInA)) {
+      return false;
+    }
+  }
+
+  // 2. Keyword-Token Matching mit strikterer Ähnlichkeitsprüfung
+  const targetWords = extractSignificantKeywords(tNorm);
+  const candWords = extractSignificantKeywords(cNorm);
+
+  if (targetWords.length === 0 || candWords.length === 0) return false;
+
+  let strongMatches = 0;
+  for (const tw of targetWords) {
+    for (const cw of candWords) {
+      if (tw === cw) {
+        strongMatches++;
+        break;
+      }
+      // Plural/Flexions-Abgleich (z. B. tomate / tomaten, apfel / äpfel, gurke / gurken)
+      const lenDiff = Math.abs(tw.length - cw.length);
+      if (lenDiff <= 2 && (tw.includes(cw) || cw.includes(tw))) {
+        strongMatches++;
+        break;
+      }
+      // Komposita-Prüfung (z. B. "rispentomaten" und "strauchtomaten")
+      if ((tw.includes(cw) && tw.endsWith(cw)) || (cw.includes(tw) && cw.endsWith(tw))) {
+        strongMatches++;
+        break;
+      }
+    }
+  }
+
+  return strongMatches > 0;
+}
+
+/**
+ * Findet günstigere Alternativen für ein Produkt im Warenkorb unter Berücksichtigung
+ * von aktiven Supermärkten und strikter semantischer Kompatibilität.
+ */
+function findAllBetterDeals(item) {
+  if (!item || !item.title || typeof item.price !== 'number' || item.price <= 0) return [];
+  const pool = Array.isArray(state.offers) ? state.offers : [];
+  if (pool.length === 0) return [];
+
+  const results = [];
+  const seen = new Set();
+
+  pool.forEach(o => {
+    if (o.id === item.id) return;
+    if (o.retailer === item.retailer) return;
+    if (Array.isArray(state.activeStores) && state.activeStores.length > 0) {
+      const isStoreActive = state.activeStores.some(s => s.toLowerCase() === (o.retailer || '').toLowerCase());
+      if (!isStoreActive) return;
+    }
+    if (typeof o.price !== 'number' || o.price >= item.price) return;
+
+    // Stringenter Kompatibilitätscheck (z.B. keine Passierten Tomaten für Rispentomaten)
+    if (!isCompatibleDeal(item.title, o.title)) return;
+
+    const key = `${o.retailer}-${o.title}-${o.price}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      const unitDiff = item.price - o.price;
+      results.push({
+        ...o,
+        title: cleanProductTitle(o.title),
+        brand: cleanBrandName(o.brand),
+        savingsVsItem: unitDiff,
+        formattedSavingsVsItem: `${(unitDiff * (item.quantity || 1)).toFixed(2).replace('.', ',')} €`,
+      });
+    }
+  });
+
+  results.sort((a, b) => a.price - b.price);
+  return results.slice(0, 5);
+}
+
+function findBetterDeal(item) {
+  const deals = findAllBetterDeals(item);
+  return deals.length > 0 ? deals[0] : null;
+}
+
+/**
+ * Tauscht ein Produkt direkt in der Zeile gegen das günstigere Alternativ-Angebot aus (ohne störendes Modal)
+ */
+function applyDirectDealSwap(targetId, dealId) {
+  const targetIdx = state.basket.findIndex(i => i.id === targetId);
+  if (targetIdx === -1) return;
+
+  const targetItem = state.basket[targetIdx];
+  const deal = (state.offers || []).find(o => o.id === dealId);
+  if (!deal) return;
+
+  // Speichere den vorherigen Zustand für den "Rückgängig"-Knopf
+  const previousState = {
+    id: targetItem.id,
+    title: targetItem.title,
+    retailer: targetItem.retailer,
+    price: targetItem.price,
+    formattedPrice: targetItem.formattedPrice,
+    oldPrice: targetItem.oldPrice,
+    formattedOldPrice: targetItem.formattedOldPrice,
+    imageUrl: targetItem.imageUrl,
+    quantity: targetItem.quantity || 1,
+  };
+
+  state.basket[targetIdx] = {
+    id: deal.id,
+    title: cleanProductTitle(deal.title),
+    retailer: deal.retailer,
+    price: deal.price,
+    formattedPrice: deal.formattedPrice,
+    oldPrice: deal.oldPrice || null,
+    formattedOldPrice: deal.formattedOldPrice || null,
+    isEstimatedOldPrice: deal.isEstimatedOldPrice || false,
+    imageUrl: deal.imageUrl || null,
+    quantity: targetItem.quantity || 1,
+    checked: targetItem.checked || false,
+    previousState: previousState,
+  };
+
+  saveBasket();
+  renderBasket();
+  showToast(`🔄 Ausgetauscht zu ${deal.title} (${deal.retailer})!`);
+}
+
+/**
+ * Macht einen vorherigen Tausch rückgängig und stellt das ursprüngliche Produkt wieder her
+ */
+function undoDealSwap(itemId) {
+  const idx = state.basket.findIndex(i => i.id === itemId);
+  if (idx === -1) return;
+
+  const currentItem = state.basket[idx];
+  if (!currentItem.previousState) return;
+
+  const prev = currentItem.previousState;
+  state.basket[idx] = {
+    id: prev.id,
+    title: prev.title,
+    retailer: prev.retailer,
+    price: prev.price,
+    formattedPrice: prev.formattedPrice,
+    oldPrice: prev.oldPrice,
+    formattedOldPrice: prev.formattedOldPrice,
+    imageUrl: prev.imageUrl,
+    quantity: currentItem.quantity || prev.quantity || 1,
+    checked: currentItem.checked || false,
+  };
+
+  saveBasket();
+  renderBasket();
+  showToast(`↩️ Ursprünglichen Artikel "${prev.title}" wiederhergestellt!`);
+}
+
+/**
+ * Fallback-Funktionen für das DealSwap-Modal
+ */
+function openDealSwapModal(targetId, dealId) {
+  const targetItem = state.basket.find(i => i.id === targetId);
+  if (!targetItem) return;
+
+  state.dealSwapTargetItem = targetItem;
+  const alternatives = findAllBetterDeals(targetItem);
+
+  if (alternatives.length > 0) {
+    applyDirectDealSwap(targetItem.id, alternatives[0].id);
+  }
+}
+
+function applyDealSwap(targetId, newOffer) {
+  if (newOffer && newOffer.id) {
+    applyDirectDealSwap(targetId, newOffer.id);
+  }
+}
+
+function closeDealSwapModal() {
+  if (elements.dealSwapModal) {
+    elements.dealSwapModal.style.display = 'none';
+    elements.dealSwapModal.setAttribute('aria-hidden', 'true');
+  }
+  state.dealSwapTargetItem = null;
+}
+
+/**
+ * ==========================================================================
+ * Meine Supermärkte (Aktivieren / Deaktivieren)
+ * ==========================================================================
+ */
+const ALL_SUPERMARKETS = [
+  'Lidl', 'Aldi Nord', 'Aldi Süd', 'REWE', 'Kaufland',
+  'Edeka', 'Penny', 'Netto Marken-Discount', 'Netto mit dem Hund',
+  'Norma', 'Alnatura', 'Denns BioMarkt', 'tegut...', 'Globus', 'Hit'
+];
+
+const DISCOUNTER_STORES = ['Lidl', 'Aldi Nord', 'Aldi Süd', 'Penny', 'Netto Marken-Discount', 'Netto mit dem Hund', 'Norma'];
+
+function initActiveStores() {
+  if (!state.activeStores || !Array.isArray(state.activeStores) || state.activeStores.length === 0) {
+    state.activeStores = [...ALL_SUPERMARKETS];
+    localStorage.setItem('sparfuchs_active_stores', JSON.stringify(state.activeStores));
+  }
+  updateStoresBadge();
+  renderRetailerChips();
+}
+
+function updateStoresBadge() {
+  if (elements.storesCountBadge) {
+    elements.storesCountBadge.textContent = state.activeStores.length;
+  }
+}
+
+/**
+ * Rendert die Händler-Filter-Chips dynamisch anhand der ausgewählten aktiven Supermärkte
+ */
+function renderRetailerChips() {
+  if (!elements.retailerChipsContainer) return;
+
+  const activeStores = Array.isArray(state.activeStores) && state.activeStores.length > 0
+    ? state.activeStores
+    : ALL_SUPERMARKETS;
+
+  // Wenn der aktuell gewählte Händlerfilter nicht mehr in den aktiven Läden ist, zurücksetzen
+  if (state.retailer !== 'all') {
+    const isStillActive = activeStores.some(s => s.toLowerCase() === state.retailer.toLowerCase());
+    if (!isStillActive) {
+      state.retailer = 'all';
+    }
+  }
+
+  const isAllActive = state.retailer === 'all';
+
+  elements.retailerChipsContainer.innerHTML = `
+    <button type="button" class="chip-retailer ${isAllActive ? 'active' : ''}" data-retailer="all">
+      Alle aktiven Märkte (${activeStores.length})
+    </button>
+    ${activeStores.map(store => {
+      const isActive = state.retailer.toLowerCase() === store.toLowerCase();
+      return `
+        <button type="button" class="chip-retailer ${isActive ? 'active' : ''}" data-retailer="${store}">
+          ${store}
+        </button>
+      `;
+    }).join('')}
+    <button type="button" class="chip-retailer-manage" id="btnManageStoresFromChips" title="Meine Supermärkte anpassen">
+      ⚙️ Märkte anpassen
+    </button>
+  `;
+
+  // Click-Listener für die Händler-Filterchips
+  elements.retailerChipsContainer.querySelectorAll('.chip-retailer').forEach(chip => {
+    chip.addEventListener('click', () => {
+      elements.retailerChipsContainer.querySelectorAll('.chip-retailer').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      state.retailer = chip.getAttribute('data-retailer');
+      if (!elements.searchInput.value.trim()) {
+        state.query = '';
+      }
+      fetchOffers();
+    });
+  });
+
+  const manageBtn = elements.retailerChipsContainer.querySelector('#btnManageStoresFromChips');
+  if (manageBtn) {
+    manageBtn.addEventListener('click', openStoresModal);
+  }
+}
+
+function openStoresModal() {
+  if (!elements.storesCheckboxList || !elements.storesModal) return;
+
+  elements.storesCheckboxList.innerHTML = ALL_SUPERMARKETS.map(store => `
+    <label class="store-checkbox-item">
+      <input type="checkbox" value="${store}" ${state.activeStores.includes(store) ? 'checked' : ''}>
+      <span>${store}</span>
+    </label>
+  `).join('');
+
+  elements.storesModal.style.display = 'flex';
+  elements.storesModal.setAttribute('aria-hidden', 'false');
+}
+
+function closeStoresModal() {
+  if (elements.storesModal) {
+    elements.storesModal.style.display = 'none';
+    elements.storesModal.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function saveActiveStores() {
+  if (!elements.storesCheckboxList) return;
+  const checkedBoxes = Array.from(elements.storesCheckboxList.querySelectorAll('input:checked'));
+  const selected = checkedBoxes.map(cb => cb.value);
+
+  if (selected.length === 0) {
+    showToast('⚠️ Bitte wähle mindestens einen Supermarkt aus!');
+    return;
+  }
+
+  state.activeStores = selected;
+  localStorage.setItem('sparfuchs_active_stores', JSON.stringify(selected));
+  updateStoresBadge();
+  renderRetailerChips();
+  closeStoresModal();
+  showToast(`✅ ${selected.length} Supermärkte aktiviert`);
+  fetchOffers();
+}
+
+/**
+ * ==========================================================================
+ * Favoriten-Manager (Konkrete & Generische Favoriten)
+ * ==========================================================================
+ */
+function openFavHubModal() {
+  if (!elements.favHubModal) return;
+  renderFavHubList();
+  elements.favHubModal.style.display = 'flex';
+  elements.favHubModal.setAttribute('aria-hidden', 'false');
+}
+
+function closeFavHubModal() {
+  if (elements.favHubModal) {
+    elements.favHubModal.style.display = 'none';
+    elements.favHubModal.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function renderFavHubList() {
+  if (!elements.favListContainer) return;
+  if (!state.favorites || state.favorites.length === 0) {
+    elements.favListContainer.innerHTML = `
+      <div style="color:var(--text-dim); text-align:center; padding:1.5rem;">
+        Du hast noch keine Favoriten gespeichert.<br>
+        Trage oben ein Lieblingsprodukt ein (z. B. <em>Bio Eier</em>, <em>Kaffee</em>) oder klicke bei einem Angebot auf das Sternchen ⭐.
+      </div>
+    `;
+    return;
+  }
+
+  elements.favListContainer.innerHTML = state.favorites.map((fav, idx) => `
+    <div class="fav-hub-item">
+      <div class="fav-hub-item-left">
+        <span class="fav-hub-star">⭐</span>
+        <span class="fav-hub-text">${fav}</span>
+      </div>
+      <button type="button" class="btn-fav-hub-delete" data-index="${idx}" title="Favorit entfernen">✕</button>
+    </div>
+  `).join('');
+
+  elements.favListContainer.querySelectorAll('.btn-fav-hub-delete').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.getAttribute('data-index'), 10);
+      const removed = state.favorites.splice(idx, 1);
+      saveFavorites();
+      renderFavoritesBadge();
+      renderFavHubList();
+      renderOffers(state.offers);
+      updateFavoritesRadar(state.offers);
+      showToast(`⭐ "${removed[0]}" aus Favoriten entfernt`);
+    });
+  });
+}
+
+function addGenericFavorite(val) {
+  if (!val) return;
+  const clean = val.trim();
+  if (!clean) return;
+
+  if (state.favorites.some(f => f.toLowerCase() === clean.toLowerCase())) {
+    showToast(`"${clean}" ist bereits in deinen Favoriten`);
+    return;
+  }
+
+  state.favorites.unshift(clean);
+  saveFavorites();
+  renderFavoritesBadge();
+  renderFavHubList();
+  renderOffers(state.offers);
+  updateFavoritesRadar(state.offers);
+  state.radarDismissed = false;
+  showToast(`⭐ "${clean}" zu Favoriten hinzugefügt!`);
+}
+
+/**
+ * ==========================================================================
+ * Sortierbare Tabelle (In-Memory Spaltensortierung)
+ * ==========================================================================
+ */
+function handleTableSort(sortKey) {
+  if (state.tableSort.key === sortKey) {
+    state.tableSort.dir = state.tableSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    state.tableSort.key = sortKey;
+    state.tableSort.dir = (sortKey === 'discount') ? 'desc' : 'asc';
+  }
+
+  sortOffersInState();
+  updateTableSortIcons();
+  renderOffers(state.offers);
+}
+
+function sortOffersInState() {
+  const { key, dir } = state.tableSort;
+  const mult = dir === 'desc' ? -1 : 1;
+
+  state.offers.sort((a, b) => {
+    switch (key) {
+      case 'title':
+        return mult * (a.title || '').localeCompare(b.title || '');
+      case 'retailer':
+        return mult * (a.retailer || '').localeCompare(b.retailer || '');
+      case 'price': {
+        const pA = typeof a.price === 'number' ? a.price : 999999;
+        const pB = typeof b.price === 'number' ? b.price : 999999;
+        return mult * (pA - pB);
+      }
+      case 'refPrice': {
+        const rA = typeof a.referencePrice === 'number' && a.referencePrice > 0 ? a.referencePrice : 999999;
+        const rB = typeof b.referencePrice === 'number' && b.referencePrice > 0 ? b.referencePrice : 999999;
+        return mult * (rA - rB);
+      }
+      case 'discount': {
+        const dA = typeof a.discountPercent === 'number' ? a.discountPercent : -1;
+        const dB = typeof b.discountPercent === 'number' ? b.discountPercent : -1;
+        return mult * (dA - dB);
+      }
+      case 'validTo': {
+        const tA = a.validTo ? new Date(a.validTo).getTime() : 9999999999999;
+        const tB = b.validTo ? new Date(b.validTo).getTime() : 9999999999999;
+        return mult * (tA - tB);
+      }
+      default:
+        return 0;
+    }
+  });
+}
+
+function updateTableSortIcons() {
+  document.querySelectorAll('.th-sortable').forEach(th => {
+    const k = th.getAttribute('data-sort');
+    const iconSpan = th.querySelector('.sort-icon');
+    if (k === state.tableSort.key) {
+      th.classList.add('th-highlight');
+      if (iconSpan) iconSpan.textContent = state.tableSort.dir === 'asc' ? '▲' : '▼';
+    } else {
+      th.classList.remove('th-highlight');
+      if (iconSpan) iconSpan.textContent = '⇅';
+    }
+  });
+}
+
+/**
+ * ==========================================================================
+ * Rezept-Import (Chefkoch & Freitext Schema.org JSON-LD Parser)
+ * ==========================================================================
+ */
+async function parseRecipeFromInput() {
+  const val = elements.recipeUrlInput ? elements.recipeUrlInput.value.trim() : '';
+  if (!val) {
+    showToast('⚠️ Bitte einen Chefkoch-Link oder Zutaten eingeben');
+    return;
+  }
+
+  if (elements.recipeParseSpinner) elements.recipeParseSpinner.style.display = 'block';
+  if (elements.recipeResultPreview) elements.recipeResultPreview.style.display = 'none';
+
+  try {
+    const isUrl = /^https?:\/\//i.test(val);
+    const payload = isUrl ? { url: val } : { text: val };
+
+    const res = await fetch('/api/recipe/parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    renderRecipePreview(data.recipe);
+  } catch (err) {
+    console.error('Rezept-Import Fehler:', err);
+    showToast('⚠️ Rezept konnte nicht geladen werden. Probiere es mit reinem Text.');
+  } finally {
+    if (elements.recipeParseSpinner) elements.recipeParseSpinner.style.display = 'none';
+  }
+}
+
+function renderRecipePreview(recipe) {
+  if (!elements.recipeResultPreview) return;
+  if (!recipe || !recipe.ingredients || recipe.ingredients.length === 0) {
+    elements.recipeResultPreview.innerHTML = `
+      <div style="color:var(--text-dim); padding:0.6rem; font-size:0.85rem; text-align:center;">
+        Keine Zutaten erkannt. Bitte Format oder Link überprüfen.
+      </div>
+    `;
+    elements.recipeResultPreview.style.display = 'block';
+    return;
+  }
+
+  state.recipeIngredients = recipe.ingredients;
+
+  elements.recipeResultPreview.innerHTML = `
+    <div class="recipe-preview-header">
+      <strong>🍲 ${recipe.title || 'Rezept-Zutaten'}</strong>
+      <span class="recipe-count-badge">${recipe.ingredients.length} Zutaten</span>
+    </div>
+    <ul class="recipe-ing-list">
+      ${recipe.ingredients.map(ing => {
+        const ingName = ing.name || ing.query || ing.original;
+        return `
+          <li>
+            <span>${ing.amount ? ing.amount + ' ' : ''}${ing.unit ? ing.unit + ' ' : ''}<strong>${ingName}</strong></span>
+          </li>
+        `;
+      }).join('')}
+    </ul>
+    <button type="button" id="applyRecipeToBasketBtn" class="btn-apply-recipe">
+      🛒 Alle ${recipe.ingredients.length} Zutaten in Einkaufszettel übernehmen & optimieren
+    </button>
+  `;
+  elements.recipeResultPreview.style.display = 'block';
+
+  const btn = document.getElementById('applyRecipeToBasketBtn');
+  if (btn) {
+    btn.addEventListener('click', () => {
+      let count = 0;
+      recipe.ingredients.forEach(ing => {
+        const ingName = ing.name || ing.query || ing.original;
+        if (ingName) {
+          addToBasket(ingName);
+          count++;
+        }
+      });
+
+      state.importedRecipesCount = (state.importedRecipesCount || 0) + 1;
+      if (elements.recipeCountBadge) {
+        elements.recipeCountBadge.style.display = 'inline-block';
+        elements.recipeCountBadge.textContent = `${state.importedRecipesCount} importiert`;
+      }
+
+      if (elements.recipeUrlInput) {
+        elements.recipeUrlInput.value = '';
+      }
+
+      elements.recipeResultPreview.innerHTML = `
+        <div class="recipe-success-box" style="background:rgba(0,229,153,0.1); border:1px solid rgba(0,229,153,0.3); border-radius:var(--radius-sm); padding:0.75rem; text-align:center;">
+          <div style="font-weight:700; color:var(--accent-primary); font-size:0.85rem;">
+            ✅ „${recipe.title || 'Rezept'}“ hinzugefügt (${count} Zutaten)!
+          </div>
+          <p style="font-size:0.75rem; color:var(--text-dim); margin:0.3rem 0 0.5rem 0;">
+            Du kannst nun direkt ein weiteres Rezept oben einfügen.
+          </p>
+          <button type="button" id="btnNextRecipe" class="btn-next-recipe">
+            ➕ Weiteres Rezept hinzufügen
+          </button>
+        </div>
+      `;
+
+      const nextBtn = document.getElementById('btnNextRecipe');
+      if (nextBtn) {
+        nextBtn.addEventListener('click', () => {
+          elements.recipeResultPreview.style.display = 'none';
+          elements.recipeResultPreview.innerHTML = '';
+          if (elements.recipeUrlInput) elements.recipeUrlInput.focus();
+        });
+      }
+
+      showToast(`🍳 ${count} Zutaten von „${recipe.title || 'Rezept'}“ übernommen!`);
+      optimizeBasket();
+    });
+  }
 }
 
 /**
@@ -2091,9 +3176,7 @@ function initEvents() {
       elements.clearSearchBtn.style.display = 'none';
       state.query = '';
       state.retailer = 'all';
-      elements.retailerChipsContainer.querySelectorAll('.chip-retailer').forEach(c => {
-        c.classList.toggle('active', c.getAttribute('data-retailer') === 'all');
-      });
+      renderRetailerChips();
       state.onlyFavorites = false;
       state.onlyBio = false;
       state.onlyFood = false;
@@ -2182,18 +3265,6 @@ function initEvents() {
     fetchOffers();
   });
 
-  // Retailer Filter Chips
-  elements.retailerChipsContainer.querySelectorAll('.chip-retailer').forEach(chip => {
-    chip.addEventListener('click', () => {
-      elements.retailerChipsContainer.querySelectorAll('.chip-retailer').forEach(c => c.classList.remove('active'));
-      chip.classList.add('active');
-      state.retailer = chip.getAttribute('data-retailer');
-      if (!elements.searchInput.value.trim()) {
-        state.query = '';
-      }
-      fetchOffers();
-    });
-  });
 
   // View Switcher
   elements.viewGridBtn.addEventListener('click', () => {
@@ -2272,8 +3343,95 @@ function initEvents() {
       closeAllDrawers();
       closeQrModal();
       closeImportModal();
+      closeStoresModal();
+      closeFavHubModal();
+      closeDealSwapModal();
     }
   });
+
+  // Mindestrabatt Chips
+  document.querySelectorAll('.chip-discount').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.chip-discount').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      state.minDiscount = parseInt(chip.getAttribute('data-min-discount'), 10) || 0;
+      fetchOffers();
+    });
+  });
+
+  // Sortierbare Tabellen-Spaltenköpfe
+  document.querySelectorAll('.th-sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const sortKey = th.getAttribute('data-sort');
+      if (sortKey) handleTableSort(sortKey);
+    });
+  });
+
+  // Meine Supermärkte Modal
+  if (elements.openStoresBtn) {
+    elements.openStoresBtn.addEventListener('click', openStoresModal);
+  }
+  if (elements.closeStoresModalBtn) {
+    elements.closeStoresModalBtn.addEventListener('click', closeStoresModal);
+  }
+  if (elements.selectAllStoresBtn) {
+    elements.selectAllStoresBtn.addEventListener('click', () => {
+      if (elements.storesCheckboxList) {
+        elements.storesCheckboxList.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = true; });
+      }
+    });
+  }
+  if (elements.selectDiscStoresBtn) {
+    elements.selectDiscStoresBtn.addEventListener('click', () => {
+      if (elements.storesCheckboxList) {
+        elements.storesCheckboxList.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+          cb.checked = DISCOUNTER_STORES.includes(cb.value);
+        });
+      }
+    });
+  }
+  if (elements.saveStoresBtn) {
+    elements.saveStoresBtn.addEventListener('click', saveActiveStores);
+  }
+
+  // Favoriten-Manager Modal
+  if (elements.openFavHubBtn) {
+    elements.openFavHubBtn.addEventListener('click', openFavHubModal);
+  }
+  if (elements.closeFavHubModalBtn) {
+    elements.closeFavHubModalBtn.addEventListener('click', closeFavHubModal);
+  }
+  if (elements.addGenericFavForm) {
+    elements.addGenericFavForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const val = elements.genericFavInput ? elements.genericFavInput.value : '';
+      addGenericFavorite(val);
+      if (elements.genericFavInput) elements.genericFavInput.value = '';
+    });
+  }
+
+  // Deal-Swap Modal
+  if (elements.closeDealSwapModalBtn) {
+    elements.closeDealSwapModalBtn.addEventListener('click', closeDealSwapModal);
+  }
+
+  // Favoriten in Optimierer einfügen
+  if (elements.insertFavsToOptBtn) {
+    elements.insertFavsToOptBtn.addEventListener('click', insertFavoritesToOptimizer);
+  }
+
+  // Rezept-Import
+  if (elements.recipeParseBtn) {
+    elements.recipeParseBtn.addEventListener('click', parseRecipeFromInput);
+  }
+  if (elements.recipeUrlInput) {
+    elements.recipeUrlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        parseRecipeFromInput();
+      }
+    });
+  }
 
   // Basket Manual Item Add Form
   elements.basketAddForm.addEventListener('submit', (e) => {
@@ -2365,13 +3523,96 @@ function initEvents() {
   }
 }
 
+/**
+ * Ermöglicht das stufenlose Skalieren der Einkaufslisten-Breite im Desktop
+ */
+function initDrawerResizing() {
+  const savedWidth = localStorage.getItem('sparfuchs_drawer_width');
+  if (savedWidth && Number(savedWidth) >= 380) {
+    document.documentElement.style.setProperty('--basket-drawer-width', `${savedWidth}px`);
+  }
+
+  const handle = elements.drawerResizeHandle;
+  const drawer = elements.basketDrawer;
+  if (!handle || !drawer) return;
+
+  let isResizing = false;
+  let startX = 0;
+  let startWidth = 480;
+
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    isResizing = true;
+    drawer.classList.add('resizing');
+    handle.classList.add('active');
+    document.body.style.cursor = 'ew-resize';
+    document.body.style.userSelect = 'none';
+
+    startX = e.clientX;
+    startWidth = drawer.getBoundingClientRect().width;
+
+    function onMouseMove(moveEvent) {
+      if (!isResizing) return;
+      const deltaX = startX - moveEvent.clientX;
+      const maxAllowed = Math.round(window.innerWidth * 0.88);
+      const newWidth = Math.max(380, Math.min(maxAllowed, startWidth + deltaX));
+      document.documentElement.style.setProperty('--basket-drawer-width', `${newWidth}px`);
+    }
+
+    function onMouseUp() {
+      if (!isResizing) return;
+      isResizing = false;
+      drawer.classList.remove('resizing');
+      handle.classList.remove('active');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+
+      const finalWidth = drawer.getBoundingClientRect().width;
+      localStorage.setItem('sparfuchs_drawer_width', Math.round(finalWidth));
+    }
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  });
+}
+
+/**
+ * Initialisiert das Ein- und Ausklappen der Rezept-Import-Box
+ */
+function initRecipeToggle() {
+  const toggleBtn = elements.btnToggleRecipeCard;
+  const header = elements.recipeHeaderToggle;
+  const card = elements.recipeImportCard;
+  if (!card) return;
+
+  function toggle() {
+    card.classList.toggle('collapsed');
+  }
+
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggle();
+    });
+  }
+
+  if (header) {
+    header.addEventListener('click', toggle);
+  }
+}
+
 // Initialisierung beim Laden
 document.addEventListener('DOMContentLoaded', () => {
   elements.plzInput.value = state.zip;
   elements.searchInput.value = state.query;
   elements.clearSearchBtn.style.display = state.query ? 'block' : 'none';
   
+  initActiveStores();
   initEvents();
+  initDrawerResizing();
+  initRecipeToggle();
   renderFavoritesBadge();
   renderBasket();
   fetchAndRenderHistory();
