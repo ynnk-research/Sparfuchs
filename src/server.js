@@ -11,9 +11,10 @@ import { searchAldiNordOffers } from './api/aldinord.js';
 import { searchNormaOffers } from './api/norma.js';
 import { searchEdekaOffers } from './api/edeka.js';
 import { filterAndSortOffers, calculateBasketTotals } from './engine/comparator.js';
-import { optimizeBasket } from './engine/optimizer.js';
+import { optimizeBasket, sanitizeItemForSearch } from './engine/optimizer.js';
 import { loadHistoryFromFile, saveHistoryToFile, calculateHouseholdStats } from './engine/history.js';
 import { CATEGORY_DEFINITIONS } from './engine/categories.js';
+import { parseRecipeInput } from './engine/recipe_parser.js';
 let QRCode = null;
 try {
   QRCode = (await import('qrcode')).default;
@@ -78,21 +79,31 @@ export function createApp() {
         onlyNonFood = 'false',
         onlyFavorites = 'false',
         favs = '',
+        minDiscount = '',
+        activeRetailers = '',
         limit = '60',
       } = req.query;
 
       const favList = favs ? favs.split(',').map(f => f.trim()).filter(Boolean) : [];
+      const activeStoreList = activeRetailers ? activeRetailers.split(',').map(r => r.trim()).filter(Boolean) : [];
+      const parsedMinDiscount = minDiscount ? parseFloat(minDiscount) : null;
       const searchQuery = q.trim();
       const isBioOnly = onlyBio === 'true';
 
       const retailerList = retailers
-        ? retailers.split(',').map(r => r.trim()).filter(Boolean)
+        ? retailers.split(',').map(r => r.trim()).filter(r => r && r.toLowerCase() !== 'all')
         : [];
       const retailerListLower = retailerList.map(r => r.toLowerCase());
 
+      const activeStoreListLower = activeStoreList.map(r => r.toLowerCase());
+
       const shouldIncludeStore = (name) => {
-        if (retailerListLower.length === 0) return true;
         const n = name.toLowerCase();
+        if (activeStoreListLower.length > 0) {
+          const isAllowed = activeStoreListLower.some(r => n.includes(r) || r.includes(n));
+          if (!isAllowed) return false;
+        }
+        if (retailerListLower.length === 0) return true;
         return retailerListLower.some(r => n.includes(r) || r.includes(n));
       };
 
@@ -167,6 +178,7 @@ export function createApp() {
         } else {
           // Alle Märkte: Parallele Händler-Abfragen in Marktguru für maximale Angebotsvielfalt
           for (const store of MARKTGURU_STORES) {
+            if (!shouldIncludeStore(store)) continue;
             fetchTasks.push(
               searchOffers({ query: store, zipCode: zip, limit: 60 })
                 .then(r => addOffers(r.offers))
@@ -236,6 +248,8 @@ export function createApp() {
         sortBy,
         category,
         retailers: retailerList,
+        allowedRetailers: activeStoreList,
+        strictSupermarketOnly: true,
         excludeAppOnly: excludeAppOnly === 'true',
         validNowOnly: validNowOnly === 'true',
         onlyBio: isBioOnly,
@@ -243,6 +257,7 @@ export function createApp() {
         onlyNonFood: onlyNonFood === 'true',
         onlyFavorites: onlyFavorites === 'true',
         favoriteKeywords: favList,
+        minDiscount: parsedMinDiscount,
       });
 
       res.json({
@@ -279,9 +294,14 @@ export function createApp() {
         items = [],
         zipCode = '10115',
         retailers = [],
+        activeRetailers = [],
         excludeAppOnly = false,
         preferReferencePrice = true,
       } = req.body;
+
+      const effectiveRetailers = Array.isArray(activeRetailers) && activeRetailers.length > 0
+        ? activeRetailers
+        : (Array.isArray(retailers) ? retailers : []);
 
       if (!Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'items muss ein nicht-leeres Array von Suchbegriffen sein.' });
@@ -294,19 +314,43 @@ export function createApp() {
         return res.status(400).json({ error: 'Keine gültigen Artikel angegeben.' });
       }
 
+      const isStoreAllowed = (name) => {
+        if (!effectiveRetailers || effectiveRetailers.length === 0) return true;
+        const n = name.toLowerCase();
+        return effectiveRetailers.some(r => {
+          const rLow = String(r).toLowerCase().trim();
+          return n.includes(rLow) || rLow.includes(n);
+        });
+      };
+
       // Paralleles Abrufen aller Artikelangebote über Marktguru, Aldi Nord, Norma und EDEKA
-      const fetchTasks = cleanItems.map(async (query) => {
+      const fetchTasks = cleanItems.map(async (rawQuery) => {
+        const query = sanitizeItemForSearch(rawQuery);
         try {
-          const [mgResult, aldiOffers, normaOffers, edekaOffers] = await Promise.all([
-            searchOffers({ query, zipCode, limit: 30 }),
-            searchAldiNordOffers(query),
-            searchNormaOffers(query),
-            searchEdekaOffers(query, zipCode),
-          ]);
-          return { query, offers: [...mgResult.offers, ...aldiOffers, ...normaOffers, ...edekaOffers] };
+          const tasks = [
+            searchOffers({ query, zipCode, limit: 80 }),
+          ];
+          if (isStoreAllowed('Aldi Nord')) {
+            tasks.push(searchAldiNordOffers(query).catch(() => []));
+          } else {
+            tasks.push(Promise.resolve([]));
+          }
+          if (isStoreAllowed('Norma')) {
+            tasks.push(searchNormaOffers(query).catch(() => []));
+          } else {
+            tasks.push(Promise.resolve([]));
+          }
+          if (isStoreAllowed('EDEKA')) {
+            tasks.push(searchEdekaOffers(query, zipCode).catch(() => []));
+          } else {
+            tasks.push(Promise.resolve([]));
+          }
+
+          const [mgResult, aldiOffers, normaOffers, edekaOffers] = await Promise.all(tasks);
+          return { query: rawQuery, offers: [...mgResult.offers, ...aldiOffers, ...normaOffers, ...edekaOffers] };
         } catch (err) {
           console.error(`Fehler bei Optimierungs-Abfrage für "${query}":`, err.message);
-          return { query, offers: [] };
+          return { query: rawQuery, offers: [] };
         }
       });
 
@@ -317,7 +361,7 @@ export function createApp() {
       }
 
       const optimization = optimizeBasket(cleanItems, itemResultsMap, {
-        retailers,
+        retailers: effectiveRetailers,
         excludeAppOnly,
         preferReferencePrice,
       });
@@ -329,6 +373,25 @@ export function createApp() {
     } catch (err) {
       console.error('Fehler bei /api/optimize:', err);
       res.status(500).json({ error: 'Fehler bei der Einkaufs-Optimierung', message: err.message });
+    }
+  });
+
+  // 2b. Rezept-Parser (Chefkoch & Web-Standard Schema.org JSON-LD / Text)
+  app.post('/api/recipe/parse', async (req, res) => {
+    try {
+      const { url, text } = req.body || {};
+      if (!url && !text) {
+        return res.status(400).json({ error: 'Bitte gib eine Rezept-URL oder Zutaten-Text ein.' });
+      }
+
+      const recipe = await parseRecipeInput({ url, text });
+      res.json({
+        success: true,
+        recipe,
+      });
+    } catch (err) {
+      console.error('Fehler bei /api/recipe/parse:', err.message);
+      res.status(400).json({ error: err.message });
     }
   });
 
