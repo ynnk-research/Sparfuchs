@@ -76,3 +76,15 @@ test('T12.2: filterOffersByCategory filtert Angebotslisten präzise', () => {
   const allOffers = filterOffersByCategory(offers, 'all');
   assert.equal(allOffers.length, 4);
 });
+
+test('T12.3: getAisleSortOrder liefert korrekten Laufweg durch den Supermarkt', async () => {
+  const { getAisleSortOrder, AISLE_ORDER } = await import('../src/engine/categories.js');
+  assert.equal(getAisleSortOrder('produce'), 1); // 1. Obst & Gemüse am Eingang
+  assert.equal(getAisleSortOrder('meat'), 2);    // 2. Frische / Fleisch
+  assert.equal(getAisleSortOrder('dairy'), 3);   // 3. Kühlregal
+  assert.equal(getAisleSortOrder('pantry'), 4);  // 4. Vorrat / Nudeln / Brot
+  assert.equal(getAisleSortOrder('drinks'), 6);  // 6. Getränke
+  assert.equal(getAisleSortOrder('nonfood'), 7); // 7. Non-Food / Drogerie
+  assert.equal(getAisleSortOrder('unknown_cat'), AISLE_ORDER.length + 1); // Fallback am Ende
+});
+

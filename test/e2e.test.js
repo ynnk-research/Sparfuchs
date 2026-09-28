@@ -26,6 +26,20 @@ test('T5.1: E2E - Server liefert Frontend-Dateien (HTML, CSS, JS) mit HTTP 200 a
     assert.equal(resJs.status, 200);
     const js = await resJs.text();
     assert.match(js, /fetchOffers/);
+    assert.match(js, /toggleStoreMode/);
+
+    // 4. Service Worker (Offline Cache)
+    const resSw = await fetch(`http://127.0.0.1:${port}/sw.js`);
+    assert.equal(resSw.status, 200);
+    const sw = await resSw.text();
+    assert.match(sw, /sparfuchs-v1/);
+
+    // 5. Neue UI-Elemente (Markt-Modus, Laufweg, Budget, Export)
+    assert.match(html, /id="toggleStoreModeBtn"/);
+    assert.match(html, /id="toggleAisleSortBtn"/);
+    assert.match(html, /id="basketBudgetInput"/);
+    assert.match(html, /id="searchHistoryRow"/);
+    assert.match(html, /id="exportCsvBtn"/);
   } finally {
     server.close();
   }

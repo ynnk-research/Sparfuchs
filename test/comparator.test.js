@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {
   filterAndSortOffers,
   getStandardizedReferencePrice,
+  extractPackageAmountAndUnit,
   isOfferCurrentlyValid,
+  isGenuineSupermarket,
+  isMatchingRetailer,
 } from '../src/engine/comparator.js';
 
 const mockOffers = [
@@ -187,3 +190,201 @@ test('T2.8: filterAndSortOffers reichert Angebote konsistent mit vollständigen 
   assert.equal(p3.savings, 0.50);
   assert.equal(p3.isEstimatedOldPrice, true);
 });
+
+test('T15.1: isGenuineSupermarket und Whitelist filtern Non-Food-Möbelhäuser und Baumärkte zuverlässig aus', () => {
+  // 1. Whitelist Prüfung
+  assert.equal(isGenuineSupermarket('Lidl'), true);
+  assert.equal(isGenuineSupermarket('Aldi Nord'), true);
+  assert.equal(isGenuineSupermarket('REWE City'), true);
+  assert.equal(isGenuineSupermarket('EDEKA Center'), true);
+  assert.equal(isGenuineSupermarket('Kaufland'), true);
+  assert.equal(isGenuineSupermarket('dm-drogerie markt'), true);
+  assert.equal(isGenuineSupermarket('Rossmann'), true);
+
+  // 2. Blacklist / Non-Supermarket Prüfung
+  assert.equal(isGenuineSupermarket('XXXLutz'), false);
+  assert.equal(isGenuineSupermarket('Mömax'), false);
+  assert.equal(isGenuineSupermarket('POCO'), false);
+  assert.equal(isGenuineSupermarket('IKEA'), false);
+  assert.equal(isGenuineSupermarket('OBI'), false);
+  assert.equal(isGenuineSupermarket('Bauhaus'), false);
+  assert.equal(isGenuineSupermarket('MediaMarkt'), false);
+
+  // 3. filterAndSortOffers schließt Angebote von Non-Supermärkten automatisch aus
+  const mixedOffers = [
+    { id: '1', title: 'Deutsche Markenbutter', retailer: 'Lidl', price: 1.49 },
+    { id: '2', title: 'Butterdose Porzellan', retailer: 'XXXLutz', price: 9.99 },
+    { id: '3', title: 'Kaffeetasse', retailer: 'POCO', price: 2.99 },
+    { id: '4', title: 'Bio Butter', retailer: 'REWE', price: 1.79 },
+    { id: '5', title: 'Bohrmaschine', retailer: 'OBI', price: 49.99 },
+  ];
+
+  const filtered = filterAndSortOffers(mixedOffers, { strictSupermarketOnly: true });
+  assert.equal(filtered.length, 2);
+  assert.equal(filtered[0].retailer, 'Lidl');
+  assert.equal(filtered[1].retailer, 'REWE');
+});
+
+test('T15.2: filterAndSortOffers filtert präzise nach Mindestrabatt (minDiscount)', () => {
+  const deals = [
+    { id: 'd1', title: 'Deal 10%', price: 9.00, oldPrice: 10.00, discountPercent: 10 },
+    { id: 'd2', title: 'Deal 25%', price: 7.50, oldPrice: 10.00, discountPercent: 25 },
+    { id: 'd3', title: 'Deal 35%', price: 6.50, oldPrice: 10.00, discountPercent: 35 },
+    { id: 'd4', title: 'Deal 50%', price: 5.00, oldPrice: 10.00, discountPercent: 50 },
+  ];
+
+  const min20 = filterAndSortOffers(deals, { minDiscount: 20 });
+  assert.equal(min20.length, 3);
+  assert.ok(min20.every(d => d.discountPercent >= 20));
+
+  const min30 = filterAndSortOffers(deals, { minDiscount: 30 });
+  assert.equal(min30.length, 2);
+  assert.ok(min30.every(d => d.discountPercent >= 30));
+
+  const min50 = filterAndSortOffers(deals, { minDiscount: 50 });
+  assert.equal(min50.length, 1);
+  assert.equal(min50[0].id, 'd4');
+});
+
+test('T15.3: filterAndSortOffers filtert nach dynamischer Liste aktiver Supermärkte (allowedRetailers)', () => {
+  const multiStoreOffers = [
+    { id: 's1', title: 'Butter', retailer: 'Lidl', price: 1.49 },
+    { id: 's2', title: 'Butter', retailer: 'Aldi Nord', price: 1.49 },
+    { id: 's3', title: 'Butter', retailer: 'REWE', price: 1.79 },
+    { id: 's4', title: 'Butter', retailer: 'EDEKA', price: 1.79 },
+    { id: 's5', title: 'Butter', retailer: 'Kaufland', price: 1.69 },
+  ];
+
+  // Nur Lidl und Aldi Nord aktiv
+  const activeSelected = filterAndSortOffers(multiStoreOffers, {
+    allowedRetailers: ['Lidl', 'Aldi Nord'],
+  });
+
+  assert.equal(activeSelected.length, 2);
+  const retailers = activeSelected.map(o => o.retailer);
+  assert.ok(retailers.includes('Lidl'));
+  assert.ok(retailers.includes('Aldi Nord'));
+  assert.ok(!retailers.includes('REWE'));
+  assert.ok(!retailers.includes('EDEKA'));
+});
+
+test('T15.4: extractPackageAmountAndUnit erkennt Einzelmengen, Multipacks und Stückzahlen', () => {
+  // 1. Einzelmengen
+  const g250 = extractPackageAmountAndUnit('250 g');
+  assert.equal(g250.baseAmount, 0.25);
+  assert.equal(g250.baseUnit, 'kg');
+
+  const l15 = extractPackageAmountAndUnit('1,5 l');
+  assert.equal(l15.baseAmount, 1.5);
+  assert.equal(l15.baseUnit, 'l');
+
+  const ml500 = extractPackageAmountAndUnit('', 'Olivenöl', 'je 500-ml-Flasche');
+  assert.equal(ml500.baseAmount, 0.5);
+  assert.equal(ml500.baseUnit, 'l');
+
+  // 2. Multipacks
+  const sixPack = extractPackageAmountAndUnit('', 'Bier 6 x 0,5 l');
+  assert.equal(sixPack.baseAmount, 3.0);
+  assert.equal(sixPack.baseUnit, 'l');
+
+  // 3. Stückzahlen
+  const eggs = extractPackageAmountAndUnit('10 Stück');
+  assert.equal(eggs.baseAmount, 10);
+  assert.equal(eggs.baseUnit, 'Stück');
+});
+
+test('T15.5: getStandardizedReferencePrice berechnet Grundpreis aus Mengenangaben wenn referencePrice fehlt', () => {
+  // Angebot ohne referencePrice, aber mit Mengenangabe 250g im Titel
+  const butterOffer = {
+    title: 'Deutsche Markenbutter 250g',
+    price: 1.49,
+    // referencePrice fehlt!
+  };
+  const std = getStandardizedReferencePrice(butterOffer);
+  // 1.49 € für 250g = 5.96 € / kg
+  assert.equal(std.pricePerBaseUnit, 5.96);
+  assert.equal(std.baseUnit, 'kg');
+  assert.equal(std.isEstimated, false);
+
+  // Getränk 1,5 Liter für 0,99 €
+  const drinkOffer = {
+    title: 'Eistee Pfirsich',
+    packageSize: '1,5 l',
+    price: 0.99,
+  };
+  const stdDrink = getStandardizedReferencePrice(drinkOffer);
+  // 0.99 € für 1.5 l = 0.66 € / l
+  assert.equal(stdDrink.pricePerBaseUnit, 0.66);
+  assert.equal(stdDrink.baseUnit, 'l');
+  assert.equal(stdDrink.isEstimated, false);
+});
+
+test('T15.6: Strikte Unterscheidung zwischen REWE und REWE Center', () => {
+  // 1. isMatchingRetailer Logik-Tests
+  assert.equal(isMatchingRetailer('REWE', 'rewe', 'rewe'), true);
+  assert.equal(isMatchingRetailer('REWE Markt', 'rewe', 'rewe'), true);
+  assert.equal(isMatchingRetailer('REWE Center', 'rewe-center', 'rewe'), false, 'REWE Center darf NICHT unter REWE erscheinen');
+  assert.equal(isMatchingRetailer('REWE', 'rewe', 'rewe center'), false, 'REWE darf NICHT unter REWE Center erscheinen');
+  assert.equal(isMatchingRetailer('REWE Center', 'rewe-center', 'rewe center'), true);
+  assert.equal(isMatchingRetailer('REWE Center Darmstadt', 'rewe-center', 'rewe center'), true);
+
+  // Edeka vs Edeka Center
+  assert.equal(isMatchingRetailer('EDEKA', 'edeka', 'edeka'), true);
+  assert.equal(isMatchingRetailer('EDEKA Center', 'edeka-center', 'edeka'), false);
+  assert.equal(isMatchingRetailer('EDEKA Center', 'edeka-center', 'edeka center'), true);
+
+  // 2. filterAndSortOffers Test mit gemischten REWE und REWE Center Angeboten
+  const mixedOffers = [
+    {
+      id: 'r1',
+      title: 'Vollmilch 1L',
+      retailer: 'REWE',
+      retailerSlug: 'rewe',
+      price: 1.09,
+      validFrom: '2026-09-20T00:00:00Z',
+      validTo: '2026-09-30T23:59:59Z',
+    },
+    {
+      id: 'rc1',
+      title: 'Vollmilch 1L Großpackung',
+      retailer: 'REWE Center',
+      retailerSlug: 'rewe-center',
+      price: 0.99,
+      validFrom: '2026-09-20T00:00:00Z',
+      validTo: '2026-09-30T23:59:59Z',
+    },
+    {
+      id: 'l1',
+      title: 'Vollmilch 1L',
+      retailer: 'Lidl',
+      retailerSlug: 'lidl',
+      price: 1.05,
+      validFrom: '2026-09-20T00:00:00Z',
+      validTo: '2026-09-30T23:59:59Z',
+    },
+  ];
+
+  // Filter nach 'REWE': nur r1
+  const reweResults = filterAndSortOffers(mixedOffers, { retailer: 'REWE' });
+  assert.equal(reweResults.length, 1);
+  assert.equal(reweResults[0].id, 'r1');
+  assert.equal(reweResults[0].retailer, 'REWE');
+
+  // Filter nach 'REWE Center': nur rc1
+  const reweCenterResults = filterAndSortOffers(mixedOffers, { retailer: 'REWE Center' });
+  assert.equal(reweCenterResults.length, 1);
+  assert.equal(reweCenterResults[0].id, 'rc1');
+  assert.equal(reweCenterResults[0].retailer, 'REWE Center');
+
+  // Filter mit allowedRetailers: ['REWE'] schließt REWE Center aus
+  const allowedReweResults = filterAndSortOffers(mixedOffers, { allowedRetailers: ['REWE'] });
+  assert.equal(allowedReweResults.length, 1);
+  assert.equal(allowedReweResults[0].id, 'r1');
+
+  // Filter mit allowedRetailers: ['REWE Center'] schließt REWE aus
+  const allowedReweCenterResults = filterAndSortOffers(mixedOffers, { allowedRetailers: ['REWE Center'] });
+  assert.equal(allowedReweCenterResults.length, 1);
+  assert.equal(allowedReweCenterResults[0].id, 'rc1');
+});
+
+
