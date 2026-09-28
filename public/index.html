@@ -126,6 +126,13 @@
           </div>
         </form>
 
+        <!-- Search History Chips -->
+        <div class="search-history-row" id="searchHistoryRow" style="display: none;">
+          <span class="search-history-label">🕒 Letzte Suchen:</span>
+          <div class="search-history-chips" id="searchHistoryChips"></div>
+          <button type="button" id="clearSearchHistoryBtn" class="btn-clear-history" title="Suchverlauf leeren">✕</button>
+        </div>
+
         <!-- Quick Tags -->
         <div class="quick-tags" id="quickTagsContainer">
           <span class="quick-tags-label">Schnellsuche:</span>
@@ -335,20 +342,50 @@
         <button type="submit" class="btn-add-item">Notieren</button>
       </form>
 
-      <!-- Quick Action Toolbar: Teilen, QR-Code & Leeren -->
+      <!-- Quick Action Toolbar: Markt-Modus, Teilen, QR-Code, Drucken & Leeren -->
       <div class="basket-toolbar-row">
+        <button type="button" id="toggleStoreModeBtn" class="btn-toolbar-storemode" title="Supermarkt-Modus starten (Display bleibt an, Daumen-Modus)">
+          <span>🛒</span>
+          <span id="storeModeBtnText">Markt-Modus</span>
+        </button>
         <button type="button" id="shareBasketBtn" class="btn-toolbar-share" title="Einkaufszettel als WhatsApp / Text teilen">
           <span>📤</span>
           <span>Teilen</span>
         </button>
         <button type="button" id="qrBasketBtn" class="btn-toolbar-qr" title="Einkaufszettel per QR-Code direkt aufs Handy übertragen">
           <span>📱</span>
-          <span>QR-Code</span>
+          <span>QR</span>
+        </button>
+        <button type="button" id="printBasketBtn" class="btn-toolbar-print" title="Einkaufszettel sauber drucken">
+          <span>🖨️</span>
+          <span>Drucken</span>
         </button>
         <button type="button" id="clearBasketBtn" class="btn-toolbar-clear" title="Einkaufszettel leeren">
           <span>🗑️</span>
-          <span>Leeren</span>
         </button>
+      </div>
+
+      <!-- Laufweg & Budget Controls Bar -->
+      <div class="basket-filter-bar">
+        <button type="button" id="toggleAisleSortBtn" class="btn-aisle-toggle" title="Nach Supermarkt-Gängen (Obst/Gemüse ➔ Frische ➔ Kühlregal ➔ Vorrat) sortieren">
+          <span>🧭</span>
+          <span id="aisleSortText">Laufweg-Sortierung: Aus</span>
+        </button>
+        <div class="basket-budget-quick" title="Einkaufs-Budget festlegen">
+          <span>🎯 Budget:</span>
+          <input type="number" id="basketBudgetInput" placeholder="Limit in €" min="0" step="5" />
+        </div>
+      </div>
+
+      <!-- Budget Progress Gauge Bar -->
+      <div id="basketBudgetBarBox" class="basket-budget-box" style="display: none;">
+        <div class="budget-meta-row">
+          <span id="budgetStatusText">Noch 0,00 € bis zum Limit</span>
+          <span id="budgetPercentPill" class="budget-pill">0%</span>
+        </div>
+        <div class="budget-track">
+          <div id="budgetProgressFill" class="budget-fill"></div>
+        </div>
       </div>
 
       <!-- Store-Grouped Items Container -->
@@ -356,11 +393,38 @@
         <!-- Rendered via JavaScript -->
       </div>
 
+      <!-- Live Supermarkt-Modus Wagenleiste (immer sichtbar im Markt-Modus) -->
+      <div id="storeModeLiveBar" class="store-mode-live-bar" style="display: none;">
+        <div class="live-bar-stats">
+          <span class="live-bar-icon">🛒</span>
+          <div>
+            <div id="liveBarCheckedCount" style="font-weight:700;">0 von 0 Artikeln im Wagen</div>
+            <div id="liveBarCheckedAmount" style="font-size:0.8rem; color:var(--accent-primary);">0,00 € im Wagen</div>
+          </div>
+        </div>
+        <button type="button" id="exitStoreModeBtn" class="btn-exit-store-mode">Beenden</button>
+      </div>
+
       <!-- Total Price & Savings Bar -->
       <div id="basketTotalBar" class="basket-total-bar" style="display: none;">
         <div class="total-row">
-          <span>Gesamtpreis:</span>
+          <span>Warenwert:</span>
           <strong id="basketGrandTotal">0,00 €</strong>
+        </div>
+        <!-- Pfand Zeile -->
+        <div class="deposit-row" id="basketDepositRow" style="display: none;">
+          <div class="deposit-label-group">
+            <span class="icon-deposit">🍾</span>
+            <span>Geschätztes Pfand:</span>
+          </div>
+          <div class="deposit-value-group">
+            <strong id="basketTotalDeposit" class="deposit-amount">+0,00 €</strong>
+          </div>
+        </div>
+        <!-- Gesamtbetrag mit Pfand -->
+        <div class="total-row grand-total-with-deposit" id="basketGrandTotalWithDepositRow" style="display: none;">
+          <span>Kassenbetrag (inkl. Pfand):</span>
+          <strong id="basketGrandTotalWithDeposit" class="grand-deposit-price">0,00 €</strong>
         </div>
         <div class="savings-row" id="basketSavingsRow" style="display: none;">
           <div class="savings-label-group">
@@ -539,7 +603,10 @@
           <h4 class="history-section-title">
             <span>🧾</span> Verbuchte Einkäufe
           </h4>
-          <button id="clearHistoryBtn" class="btn-text-danger" title="Gesamte Historie zurücksetzen">Historie leeren</button>
+          <div class="history-actions-row">
+            <button id="exportCsvBtn" class="btn-secondary btn-sm" title="Einkaufshistorie als CSV für Excel & Finanz-Tools herunterladen">📥 CSV Export</button>
+            <button id="clearHistoryBtn" class="btn-text-danger" title="Gesamte Historie zurücksetzen">Historie leeren</button>
+          </div>
         </div>
         <div id="receiptsListContainer" class="receipts-list">
           <!-- Rendered via JavaScript -->

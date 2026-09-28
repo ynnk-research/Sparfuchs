@@ -39,6 +39,12 @@ const state = {
   tableSort: { key: 'refPrice', dir: 'asc' },
   dealSwapTargetItem: null,
   recipeIngredients: [],
+  // Phase 2 & 3 State
+  storeMode: false,
+  wakeLock: null,
+  aisleSort: false,
+  budget: parseFloat(localStorage.getItem('sparfuchs_budget') || '0'),
+  searchHistory: JSON.parse(localStorage.getItem('sparfuchs_search_history') || '[]'),
 };
 
 /**
@@ -64,7 +70,6 @@ const elements = {
   plzInput: document.getElementById('plzInput'),
   plzUpdateBtn: document.getElementById('plzUpdateBtn'),
   allOffersTag: document.getElementById('allOffersTag'),
-  favQuickBtn: document.getElementById('favQuickBtn'),
   favCountBadge: document.getElementById('favCountBadge'),
   favoritesSearchTag: document.getElementById('favoritesSearchTag'),
   openHistoryBtn: document.getElementById('openHistoryBtn'),
@@ -191,6 +196,31 @@ const elements = {
   recipeHeaderToggle: document.getElementById('recipeHeaderToggle'),
   btnToggleRecipeCard: document.getElementById('btnToggleRecipeCard'),
   recipeCountBadge: document.getElementById('recipeCountBadge'),
+  // Supermarkt-Modus & Laufweg
+  toggleStoreModeBtn: document.getElementById('toggleStoreModeBtn'),
+  storeModeBtnText: document.getElementById('storeModeBtnText'),
+  storeModeLiveBar: document.getElementById('storeModeLiveBar'),
+  liveBarCheckedCount: document.getElementById('liveBarCheckedCount'),
+  liveBarCheckedAmount: document.getElementById('liveBarCheckedAmount'),
+  exitStoreModeBtn: document.getElementById('exitStoreModeBtn'),
+  toggleAisleSortBtn: document.getElementById('toggleAisleSortBtn'),
+  aisleSortText: document.getElementById('aisleSortText'),
+  // Budget & Pfand
+  basketBudgetInput: document.getElementById('basketBudgetInput'),
+  basketBudgetBarBox: document.getElementById('basketBudgetBarBox'),
+  budgetStatusText: document.getElementById('budgetStatusText'),
+  budgetPercentPill: document.getElementById('budgetPercentPill'),
+  budgetProgressFill: document.getElementById('budgetProgressFill'),
+  basketDepositRow: document.getElementById('basketDepositRow'),
+  basketTotalDeposit: document.getElementById('basketTotalDeposit'),
+  basketGrandTotalWithDepositRow: document.getElementById('basketGrandTotalWithDepositRow'),
+  basketGrandTotalWithDeposit: document.getElementById('basketGrandTotalWithDeposit'),
+  printBasketBtn: document.getElementById('printBasketBtn'),
+  // Suchverlauf & Export
+  searchHistoryRow: document.getElementById('searchHistoryRow'),
+  searchHistoryChips: document.getElementById('searchHistoryChips'),
+  clearSearchHistoryBtn: document.getElementById('clearSearchHistoryBtn'),
+  exportCsvBtn: document.getElementById('exportCsvBtn'),
 };
 
 /**
@@ -222,6 +252,289 @@ function formatShortDate(isoString) {
     return '';
   }
 }
+
+/**
+ * Ermittelt Dringlichkeits-Informationen für Angebote ("Nur noch heute!", "Endet morgen!")
+ */
+function getUrgencyBadgeInfo(validTo, validFrom) {
+  if (!validTo) return null;
+  const now = new Date();
+  const to = new Date(validTo);
+  if (isNaN(to.getTime())) return null;
+
+  // Zukünftiges Angebot (z.B. ab Donnerstag)
+  if (validFrom) {
+    const from = new Date(validFrom);
+    if (!isNaN(from.getTime()) && from > now) {
+      return {
+        className: 'urgent-upcoming',
+        label: `Ab ${formatShortDate(validFrom)}`,
+        icon: '🗓️',
+      };
+    }
+  }
+
+  const diffMs = to.getTime() - now.getTime();
+  const diffHours = diffMs / (1000 * 60 * 60);
+
+  if (diffHours <= 0) {
+    return {
+      className: 'urgent-today',
+      label: 'Läuft heute ab!',
+      icon: '⏰',
+    };
+  } else if (diffHours <= 24) {
+    return {
+      className: 'urgent-today',
+      label: 'Nur noch heute!',
+      icon: '🔥',
+    };
+  } else if (diffHours <= 48) {
+    return {
+      className: 'urgent-tomorrow',
+      label: 'Endet morgen!',
+      icon: '⏳',
+    };
+  }
+  return null;
+}
+
+/**
+ * Erkennt automatisch deutsches Einweg- und Mehrwegpfand für Getränke
+ */
+function detectDepositClient(item) {
+  if (!item) return 0;
+  const text = `${item.title || ''} ${item.description || ''} ${item.packageSize || ''}`.toLowerCase();
+
+  // Nicht-Getränke ausschließen
+  if (/(suppe|ravioli|gulasch|eintopf|bohne|erbse|mais|thunfisch|tomat|tierfutter|hundefutter|katzenfutter|farbdose|lack)/i.test(text)) {
+    return 0;
+  }
+
+  // 1. Getränkekästen / Kisten
+  if (/\b(kasten|kiste)\b/i.test(text)) {
+    if (/\bbügel/i.test(text)) return 4.50;
+    if (/\b(wasser|mineralwasser|sprudel)\b/i.test(text)) return 3.30;
+    return 3.10;
+  }
+
+  // 2. Sixpack / Gebinde
+  const sixMatch = text.match(/\b(?:6\s*[xX*]\s*0,[35]|sixpack|6er\s*träger)\b/i);
+  if (sixMatch) {
+    if (/\b(dose|dosen|can|energy|cola|pepsi)\b/i.test(text)) return 1.50;
+    return 0.48;
+  }
+
+  // 3. Joghurt/Milch im Mehrweg-Pfandglas (0,15 €)
+  if (/\b(pfandglas|mehrwegglas)\b/i.test(text) || (/\bjoghurt\b/i.test(text) && /\bglas\b/i.test(text))) {
+    return 0.15;
+  }
+
+  // 4. Einweg-Dosen (0,25 €)
+  if (/\b(dose|dosen|can|energy|red bull|monster|rockstar|booster|dr pepper|coca[- ]cola|cola|pepsi|fanta|sprite|mezzo mix|schweppes)\b/i.test(text)) {
+    return 0.25;
+  }
+
+  // 5. Einweg-PET-Flaschen (0,25 €)
+  if (/\b(pet|einweg|volvic|vio|gerolsteiner.*pet|vittel)\b/i.test(text)) {
+    return 0.25;
+  }
+
+  // 6. Bierflaschen (Mehrweg 0,08 € oder 0,15 €)
+  if (/\b(bier|pils|pilsener|pilsner|weizen|helles|export|radler|kölsch|altbier|brauerei)\b/i.test(text) || /\bbügel/i.test(text)) {
+    if (/\b(bügel|flensburger|mönchshof)/i.test(text)) {
+      return 0.15;
+    }
+    return 0.08;
+  }
+
+  // 7. Allgemeine Glasflaschen Mehrweg (0,15 €)
+  if (/\b(mehrweg|brunnen|quelle|mineralwasser|saft)\b/i.test(text) && /\bglas\b/i.test(text)) {
+    return 0.15;
+  }
+
+  return 0;
+}
+
+/**
+ * Supermarkt-Gänge Zuordnung & Laufweg
+ */
+const AISLE_ORDER_MAP = {
+  produce: { order: 1, label: 'Obst & Gemüse', icon: '🍎' },
+  meat: { order: 2, label: 'Fleisch & Frische', icon: '🥩' },
+  dairy: { order: 3, label: 'Kühlregal & Molkerei', icon: '🧀' },
+  pantry: { order: 4, label: 'Vorrat & Grundnahrung', icon: '🍝' },
+  snacks: { order: 5, label: 'Süßes & Snacks', icon: '🍫' },
+  drinks: { order: 6, label: 'Kaffee & Getränke', icon: '☕' },
+  nonfood: { order: 7, label: 'Drogerie & Aktionsware', icon: '📦' },
+  other: { order: 8, label: 'Sonstiges', icon: '🛒' },
+};
+
+function getItemAisle(item) {
+  if (!item) return { id: 'other', ...AISLE_ORDER_MAP.other };
+  if (item.categoryId && AISLE_ORDER_MAP[item.categoryId]) {
+    return { id: item.categoryId, ...AISLE_ORDER_MAP[item.categoryId] };
+  }
+  const text = `${item.title || ''} ${item.description || ''}`.toLowerCase();
+  if (/(apfel|banan|tomat|gurk|kartoffel|salat|beere|möhre|karotte|avocado|zwiebel|orange|zitron)/i.test(text)) {
+    return { id: 'produce', ...AISLE_ORDER_MAP.produce };
+  }
+  if (/(fleisch|hack|steak|schnitzel|wurst|salami|schinken|hähnchen|huhn|lachs|fisch|tofu)/i.test(text)) {
+    return { id: 'meat', ...AISLE_ORDER_MAP.meat };
+  }
+  if (/(milch|butter|käse|joghurt|quark|sahne|eier|frischkäse|skyr|gouda)/i.test(text)) {
+    return { id: 'dairy', ...AISLE_ORDER_MAP.dairy };
+  }
+  if (/(kaffee|espresso|tee|wasser|bier|cola|limo|saft|wein|sekt|drink)/i.test(text)) {
+    return { id: 'drinks', ...AISLE_ORDER_MAP.drinks };
+  }
+  if (/(schoko|chips|keks|eis|gummi|haribo|knoppers|hanuta)/i.test(text)) {
+    return { id: 'snacks', ...AISLE_ORDER_MAP.snacks };
+  }
+  if (/(nudel|pasta|spaghetti|reis|mehl|zucker|öl|essig|sauce|ketchup|brot|toast|brötchen|hafer)/i.test(text)) {
+    return { id: 'pantry', ...AISLE_ORDER_MAP.pantry };
+  }
+  if (/(drogerie|shampoo|seife|zahnpasta|deo|waschmittel|spülmittel|klopapier|küchenrolle|werkzeug|deko|tierfutter)/i.test(text) || item.isNonFood) {
+    return { id: 'nonfood', ...AISLE_ORDER_MAP.nonfood };
+  }
+  return { id: 'other', ...AISLE_ORDER_MAP.other };
+}
+
+/**
+ * Schaltet den Supermarkt-Modus um (Screen Wake Lock, Fokus-Ansicht & Daumen-Bedienung)
+ */
+async function toggleStoreMode() {
+  state.storeMode = !state.storeMode;
+  document.body.classList.toggle('store-mode-active', state.storeMode);
+
+  if (elements.toggleStoreModeBtn) {
+    elements.toggleStoreModeBtn.classList.toggle('active', state.storeMode);
+  }
+  if (elements.storeModeBtnText) {
+    elements.storeModeBtnText.textContent = state.storeMode ? 'Markt-Modus An' : 'Markt-Modus';
+  }
+
+  if (state.storeMode) {
+    if ('wakeLock' in navigator) {
+      try {
+        state.wakeLock = await navigator.wakeLock.request('screen');
+        state.wakeLock.addEventListener('release', () => {
+          if (!state.storeMode) state.wakeLock = null;
+        });
+      } catch (err) {
+        console.warn('Wake Lock konnte nicht aktiviert werden:', err);
+      }
+    }
+    showToast('🛒 Supermarkt-Modus aktiv: Display bleibt an!');
+  } else {
+    if (state.wakeLock) {
+      try {
+        await state.wakeLock.release();
+      } catch (_) {}
+      state.wakeLock = null;
+    }
+    showToast('Supermarkt-Modus beendet.');
+  }
+
+  renderBasket();
+}
+
+/**
+ * Fügt einen Suchbegriff zum Verlauf der letzten Suchen hinzu
+ */
+function addQueryToSearchHistory(q) {
+  if (!q || q.trim().length < 2) return;
+  const clean = q.trim();
+  state.searchHistory = (state.searchHistory || []).filter(item => item.toLowerCase() !== clean.toLowerCase());
+  state.searchHistory.unshift(clean);
+  if (state.searchHistory.length > 6) {
+    state.searchHistory = state.searchHistory.slice(0, 6);
+  }
+  localStorage.setItem('sparfuchs_search_history', JSON.stringify(state.searchHistory));
+  renderSearchHistoryChips();
+}
+
+/**
+ * Rendert die Klick-Chips der letzten Suchbegriffe
+ */
+function renderSearchHistoryChips() {
+  if (!elements.searchHistoryRow || !elements.searchHistoryChips) return;
+  if (!state.searchHistory || state.searchHistory.length === 0) {
+    elements.searchHistoryRow.style.display = 'none';
+    return;
+  }
+  elements.searchHistoryRow.style.display = 'flex';
+  elements.searchHistoryChips.innerHTML = state.searchHistory.map(term => {
+    return `<button type="button" class="history-chip" data-query="${term.replace(/"/g, '&quot;')}">${term}</button>`;
+  }).join('');
+
+  elements.searchHistoryChips.querySelectorAll('.history-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const q = chip.getAttribute('data-query');
+      elements.searchInput.value = q;
+      elements.clearSearchBtn.style.display = 'block';
+      state.query = q;
+      state.onlyFavorites = false;
+      elements.toggleFavFilterBtn.classList.remove('active');
+      fetchOffers();
+    });
+  });
+}
+
+/**
+ * Exportiert die verbuchte Haushalts-Historie als CSV (für Excel & Tabellen-Kalkulation)
+ */
+function exportHistoryAsCsv() {
+  if (!state.history || state.history.length === 0) {
+    showToast('⚠️ Keine verbuchten Einkäufe zum Exportieren vorhanden.');
+    return;
+  }
+
+  const rows = [];
+  rows.push(['Datum', 'Uhrzeit', 'Supermarkt', 'Artikel', 'Menge', 'Einzelpreis (€)', 'Gesamtpreis (€)', 'Gespart (€)'].join(';'));
+
+  state.history.forEach(receipt => {
+    const dateObj = new Date(receipt.date);
+    const dateStr = !isNaN(dateObj.getTime())
+      ? `${String(dateObj.getDate()).padStart(2, '0')}.${String(dateObj.getMonth() + 1).padStart(2, '0')}.${dateObj.getFullYear()}`
+      : (receipt.date || '');
+    const timeStr = !isNaN(dateObj.getTime())
+      ? `${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}`
+      : '';
+
+    const storeStr = Array.isArray(receipt.stores) ? receipt.stores.join(' + ') : 'Supermarkt';
+
+    if (Array.isArray(receipt.items) && receipt.items.length > 0) {
+      receipt.items.forEach(it => {
+        const title = (it.title || '').replace(/;/g, ',');
+        const store = (it.retailer || storeStr).replace(/;/g, ',');
+        const qty = it.quantity || 1;
+        const price = (typeof it.price === 'number') ? it.price.toFixed(2).replace('.', ',') : '0,00';
+        const lineTotal = (typeof it.price === 'number') ? (it.price * qty).toFixed(2).replace('.', ',') : '0,00';
+        const lineSavings = (typeof it.savings === 'number') ? it.savings.toFixed(2).replace('.', ',') : '0,00';
+
+        rows.push([dateStr, timeStr, store, title, qty, price, lineTotal, lineSavings].join(';'));
+      });
+    } else {
+      const paid = (receipt.totalPaid || 0).toFixed(2).replace('.', ',');
+      const sav = (receipt.totalSavings || 0).toFixed(2).replace('.', ',');
+      rows.push([dateStr, timeStr, storeStr, 'Gesamter Einkauf', receipt.itemCount || 1, paid, paid, sav].join(';'));
+    }
+  });
+
+  const csvContent = '\uFEFF' + rows.join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `SparFuchs-Einkaufshistorie-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('📥 Einkaufshistorie erfolgreich als CSV heruntergeladen!');
+}
+
 
 /**
  * Prüft, ob ein Angebot in den Favoriten gespeichert ist
@@ -479,6 +792,15 @@ function renderOffers(offers) {
                 <span>Gültig bis ${validToStr}</span>
               </div>
             ` : ''}
+            ${(() => {
+              const urgency = getUrgencyBadgeInfo(offer.validTo, offer.validFrom);
+              return urgency ? `
+                <div class="deal-urgency-badge ${urgency.className}">
+                  <span>${urgency.icon}</span>
+                  <span>${urgency.label}</span>
+                </div>
+              ` : '';
+            })()}
 
             <button class="btn-card-add" 
               data-id="${offer.id}"
@@ -549,7 +871,13 @@ function renderOffers(offers) {
             ${offer.discountPercent ? `<span class="savings-tag">-${offer.discountPercent}%</span>` : ''}
           </div>
         </td>
-        <td>${validToStr || 'Aktuell'}</td>
+        <td>
+          <div>${validToStr || 'Aktuell'}</div>
+          ${(() => {
+            const urgency = getUrgencyBadgeInfo(offer.validTo, offer.validFrom);
+            return urgency ? `<div class="deal-urgency-badge ${urgency.className}" style="font-size:0.68rem; padding:0.12rem 0.4rem; margin-top:0.25rem;">${urgency.icon} ${urgency.label}</div>` : '';
+          })()}
+        </td>
         <td>
           <button class="btn-card-add" style="margin:0; padding:0.4rem 0.7rem;" 
             data-id="${offer.id}"
@@ -726,6 +1054,12 @@ function toggleItemChecked(id) {
   if (item) {
     item.checked = !item.checked;
     saveBasket();
+
+    // Haptisches Feedback auf dem Smartphone
+    if (navigator.vibrate) {
+      try { navigator.vibrate(18); } catch (_) {}
+    }
+
     renderBasket();
   }
 }
@@ -803,7 +1137,8 @@ function getItemSavings(item) {
 }
 
 /**
- * Rendert die Einkaufsliste GRUPPIERT nach Supermarkt mit Mengen-Steuerung (+/-) und Ersparnissen!
+ * Rendert die Einkaufsliste GRUPPIERT nach Supermarkt mit Mengen-Steuerung (+/-),
+ * Laufweg-Sortierung nach Gängen, Supermarkt-Modus und automatischer Pfand- & Budget-Kalkulation!
  */
 function renderBasket() {
   const totalUnits = state.basket.reduce((sum, it) => sum + (it.quantity || 1), 0);
@@ -818,6 +1153,8 @@ function renderBasket() {
       </div>
     `;
     elements.basketTotalBar.style.display = 'none';
+    if (elements.storeModeLiveBar) elements.storeModeLiveBar.style.display = 'none';
+    if (elements.basketBudgetBarBox) elements.basketBudgetBarBox.style.display = 'none';
     elements.optimizationResultContainer.style.display = 'none';
     return;
   }
@@ -826,6 +1163,9 @@ function renderBasket() {
   const groups = {};
   let grandTotal = 0;
   let grandOriginalTotal = 0;
+  let grandDeposit = 0;
+  let checkedCount = 0;
+  let checkedAmount = 0;
 
   state.basket.forEach(item => {
     const store = item.retailer || 'Einkaufsnotizen';
@@ -835,6 +1175,16 @@ function renderBasket() {
     groups[store].push(item);
     
     const qty = (typeof item.quantity === 'number' && item.quantity > 0) ? item.quantity : 1;
+    const dep = detectDepositClient(item);
+    grandDeposit += dep * qty;
+
+    if (item.checked) {
+      checkedCount += qty;
+      if (typeof item.price === 'number' && item.price > 0) {
+        checkedAmount += (item.price + dep) * qty;
+      }
+    }
+
     if (typeof item.price === 'number' && item.price > 0) {
       grandTotal += item.price * qty;
       const sanitizedOld = validateAndSanitizeClientPrice(item.price, item.oldPrice, item.isNonFood);
@@ -847,9 +1197,105 @@ function renderBasket() {
 
   const grandSavings = Math.max(0, grandOriginalTotal - grandTotal);
 
+  // Helper zum Rendern einer einzelnen Artikel-Zeile
+  const renderItemHtml = (it) => {
+    const qty = (typeof it.quantity === 'number' && it.quantity > 0) ? it.quantity : 1;
+    const hasOld = (typeof it.oldPrice === 'number' && it.oldPrice > it.price);
+    const oldPriceVal = hasOld ? it.oldPrice : (it.price > 0 ? it.price * 1.25 : null);
+    const itemSavingsPerUnit = (oldPriceVal && oldPriceVal > it.price) ? (oldPriceVal - it.price) : 0;
+    const itemTotalSavings = itemSavingsPerUnit * qty;
+    const itemDiscountPct = (oldPriceVal && oldPriceVal > it.price) ? Math.round((itemSavingsPerUnit / oldPriceVal) * 100) : null;
+    const lineTotal = (it.price > 0) ? (it.price * qty) : 0;
+    const lineTotalFormatted = lineTotal > 0 ? `${lineTotal.toFixed(2).replace('.', ',')} €` : '—';
+    const unitPriceFormatted = it.formattedPrice || (it.price > 0 ? `${it.price.toFixed(2).replace('.', ',')} €` : '');
+    const cleanTitle = (it.title || '').replace(/\bthisisnobrand123\b/gi, '').trim();
+    const betterDeal = findBetterDeal(it);
+    const itemDeposit = detectDepositClient(it) * qty;
+    const aisle = getItemAisle(it);
+
+    return `
+      <div class="basket-item-wrapper" data-id="${it.id}">
+        <div class="basket-item-row ${it.checked ? 'checked' : ''}" data-id="${it.id}">
+          <div class="basket-item-left">
+            <input 
+              type="checkbox" 
+              class="basket-checkbox" 
+              data-id="${it.id}" 
+              ${it.checked ? 'checked' : ''}
+              title="Als erledigt abhaken"
+            >
+            <div class="basket-item-thumb-col">
+              ${it.imageUrl ? `
+                <img class="basket-item-img" src="${it.imageUrl}" alt="${cleanTitle.replace(/"/g, '&quot;')}" onerror="this.style.display='none';">
+              ` : `
+                <div class="basket-item-img-placeholder">🛒</div>
+              `}
+              <div class="basket-qty-control" title="Stückzahl anpassen">
+                <button type="button" class="btn-qty btn-qty-minus" data-id="${it.id}" title="1 weniger">−</button>
+                <span class="qty-num">${qty}</span>
+                <button type="button" class="btn-qty btn-qty-plus" data-id="${it.id}" title="1 mehr">+</button>
+              </div>
+            </div>
+            <div class="basket-item-info">
+              <span class="basket-item-name">${cleanTitle}</span>
+              ${state.aisleSort ? `
+                <div class="aisle-badge" title="Supermarkt-Gang">
+                  <span>${aisle.icon}</span>
+                  <span>${aisle.label}</span>
+                </div>
+              ` : ''}
+              ${qty > 1 && it.price > 0 ? `
+                <div class="basket-item-single-calc">${qty} × ${unitPriceFormatted}</div>
+              ` : ''}
+              ${itemDeposit > 0 ? `
+                <div class="basket-item-deposit-calc" style="font-size:0.75rem; color:#60a5fa; margin-top:0.15rem;">
+                  +${itemDeposit.toFixed(2).replace('.', ',')} € Pfand (${qty > 1 ? `${qty}× ` : ''}${(itemDeposit / qty).toFixed(2).replace('.', ',')} €)
+                </div>
+              ` : ''}
+              ${itemTotalSavings > 0 ? `
+                <div class="basket-item-subprice">
+                  <span class="basket-item-statt">statt ${(oldPriceVal * qty).toFixed(2).replace('.', ',')} €</span>
+                  <span class="basket-item-saving">Du sparst ${itemTotalSavings.toFixed(2).replace('.', ',')} €</span>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+          <div class="basket-item-right">
+            ${it.price > 0 ? `
+              <div class="basket-item-price-col">
+                <span class="basket-item-price">${lineTotalFormatted}</span>
+                ${itemDiscountPct ? `<span class="basket-item-discount-pill">-${itemDiscountPct}%</span>` : ''}
+              </div>
+            ` : ''}
+            <button class="btn-item-del" data-id="${it.id}" title="Entfernen">✕</button>
+          </div>
+        </div>
+
+        ${it.previousState ? `
+          <div class="basket-swapped-notice">
+            <span>✅ Getauscht von <em>${it.previousState.title} (${it.previousState.retailer})</em></span>
+            <button type="button" class="btn-undo-swap" data-id="${it.id}" title="Ursprünglichen Artikel wiederherstellen">
+              ↩️ Rückgängig
+            </button>
+          </div>
+        ` : (betterDeal ? `
+          <div class="basket-deal-swap-alert">
+            <div class="deal-swap-alert-text">
+              💡 <strong>Günstiger bei ${betterDeal.retailer}:</strong> ${betterDeal.title} für <strong>${betterDeal.formattedPrice}</strong>
+              ${betterDeal.formattedSavingsVsItem ? `<span class="deal-swap-saving">(Ersparnis: ${betterDeal.formattedSavingsVsItem})</span>` : ''}
+            </div>
+            <button type="button" class="btn-swap-deal" data-target-id="${it.id}" data-deal-id="${betterDeal.id}" title="Direkt gegen dieses Angebot austauschen">
+              🔄 Tauschen
+            </button>
+          </div>
+        ` : '')}
+      </div>
+    `;
+  };
+
   // HTML für jeden Supermarkt generieren
   const groupHtml = Object.keys(groups).map(store => {
-    const items = groups[store];
+    let items = groups[store];
     const storeOfferTotal = items.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 1)), 0);
     const storeOriginalTotal = items.reduce((sum, it) => {
       const qty = it.quantity || 1;
@@ -863,6 +1309,40 @@ function renderBasket() {
     const subtotalStr = storeOfferTotal > 0 ? `${storeOfferTotal.toFixed(2).replace('.', ',')} €` : '';
     const oldSubtotalStr = storeOriginalTotal > storeOfferTotal ? `${storeOriginalTotal.toFixed(2).replace('.', ',')} €` : '';
     const savingsStr = storeSavings > 0 ? `${storeSavings.toFixed(2).replace('.', ',')} €` : '';
+
+    // Wenn Laufweg-Sortierung aktiv: nach Abteilungen sortieren
+    if (state.aisleSort) {
+      items = [...items].sort((a, b) => getItemAisle(a).order - getItemAisle(b).order);
+    }
+
+    // Wenn Supermarkt-Modus aktiv: Aufteilung in "Noch zu besorgen" vs "Bereits im Wagen"
+    let listContentHtml = '';
+    if (state.storeMode) {
+      const pendingItems = items.filter(it => !it.checked);
+      const doneItems = items.filter(it => it.checked);
+
+      listContentHtml = `
+        ${pendingItems.length > 0 ? `
+          <div class="store-mode-section-title">
+            <span>🛒 Noch zu besorgen (${pendingItems.length})</span>
+          </div>
+          ${pendingItems.map(renderItemHtml).join('')}
+        ` : `
+          <div class="store-mode-section-title" style="color:var(--accent-primary);">
+            <span>🎉 Alle Artikel bei ${store} im Wagen!</span>
+          </div>
+        `}
+
+        ${doneItems.length > 0 ? `
+          <div class="store-mode-section-title" style="margin-top:1rem; opacity:0.8;">
+            <span>✅ Im Einkaufswagen (${doneItems.length})</span>
+          </div>
+          ${doneItems.map(renderItemHtml).join('')}
+        ` : ''}
+      `;
+    } else {
+      listContentHtml = items.map(renderItemHtml).join('');
+    }
 
     return `
       <div class="store-group-card" data-store="${store}">
@@ -880,93 +1360,71 @@ function renderBasket() {
         </div>
         
         <div class="store-items-list">
-          ${items.map(it => {
-            const qty = (typeof it.quantity === 'number' && it.quantity > 0) ? it.quantity : 1;
-            const hasOld = (typeof it.oldPrice === 'number' && it.oldPrice > it.price);
-            const oldPriceVal = hasOld ? it.oldPrice : (it.price > 0 ? it.price * 1.25 : null);
-            const itemSavingsPerUnit = (oldPriceVal && oldPriceVal > it.price) ? (oldPriceVal - it.price) : 0;
-            const itemTotalSavings = itemSavingsPerUnit * qty;
-            const itemDiscountPct = (oldPriceVal && oldPriceVal > it.price) ? Math.round((itemSavingsPerUnit / oldPriceVal) * 100) : null;
-            const lineTotal = (it.price > 0) ? (it.price * qty) : 0;
-            const lineTotalFormatted = lineTotal > 0 ? `${lineTotal.toFixed(2).replace('.', ',')} €` : '—';
-            const unitPriceFormatted = it.formattedPrice || (it.price > 0 ? `${it.price.toFixed(2).replace('.', ',')} €` : '');
-            const cleanTitle = (it.title || '').replace(/\bthisisnobrand123\b/gi, '').trim();
-            const betterDeal = findBetterDeal(it);
-
-            return `
-              <div class="basket-item-wrapper" data-id="${it.id}">
-                <div class="basket-item-row ${it.checked ? 'checked' : ''}" data-id="${it.id}">
-                  <div class="basket-item-left">
-                    <input 
-                      type="checkbox" 
-                      class="basket-checkbox" 
-                      data-id="${it.id}" 
-                      ${it.checked ? 'checked' : ''}
-                      title="Als erledigt abhaken"
-                    >
-                    <div class="basket-item-thumb-col">
-                      ${it.imageUrl ? `
-                        <img class="basket-item-img" src="${it.imageUrl}" alt="${cleanTitle.replace(/"/g, '&quot;')}" onerror="this.style.display='none';">
-                      ` : `
-                        <div class="basket-item-img-placeholder">🛒</div>
-                      `}
-                      <div class="basket-qty-control" title="Stückzahl anpassen">
-                        <button type="button" class="btn-qty btn-qty-minus" data-id="${it.id}" title="1 weniger">−</button>
-                        <span class="qty-num">${qty}</span>
-                        <button type="button" class="btn-qty btn-qty-plus" data-id="${it.id}" title="1 mehr">+</button>
-                      </div>
-                    </div>
-                    <div class="basket-item-info">
-                      <span class="basket-item-name">${cleanTitle}</span>
-                      ${qty > 1 && it.price > 0 ? `
-                        <div class="basket-item-single-calc">${qty} × ${unitPriceFormatted}</div>
-                      ` : ''}
-                      ${itemTotalSavings > 0 ? `
-                        <div class="basket-item-subprice">
-                          <span class="basket-item-statt">statt ${(oldPriceVal * qty).toFixed(2).replace('.', ',')} €</span>
-                          <span class="basket-item-saving">Du sparst ${itemTotalSavings.toFixed(2).replace('.', ',')} €</span>
-                        </div>
-                      ` : ''}
-                    </div>
-                  </div>
-                  <div class="basket-item-right">
-                    ${it.price > 0 ? `
-                      <div class="basket-item-price-col">
-                        <span class="basket-item-price">${lineTotalFormatted}</span>
-                        ${itemDiscountPct ? `<span class="basket-item-discount-pill">-${itemDiscountPct}%</span>` : ''}
-                      </div>
-                    ` : ''}
-                    <button class="btn-item-del" data-id="${it.id}" title="Entfernen">✕</button>
-                  </div>
-                </div>
-
-                ${it.previousState ? `
-                  <div class="basket-swapped-notice">
-                    <span>✅ Getauscht von <em>${it.previousState.title} (${it.previousState.retailer})</em></span>
-                    <button type="button" class="btn-undo-swap" data-id="${it.id}" title="Ursprünglichen Artikel wiederherstellen">
-                      ↩️ Rückgängig
-                    </button>
-                  </div>
-                ` : (betterDeal ? `
-                  <div class="basket-deal-swap-alert">
-                    <div class="deal-swap-alert-text">
-                      💡 <strong>Günstiger bei ${betterDeal.retailer}:</strong> ${betterDeal.title} für <strong>${betterDeal.formattedPrice}</strong>
-                      ${betterDeal.formattedSavingsVsItem ? `<span class="deal-swap-saving">(Ersparnis: ${betterDeal.formattedSavingsVsItem})</span>` : ''}
-                    </div>
-                    <button type="button" class="btn-swap-deal" data-target-id="${it.id}" data-deal-id="${betterDeal.id}" title="Direkt gegen dieses Angebot austauschen">
-                      🔄 Tauschen
-                    </button>
-                  </div>
-                ` : '')}
-              </div>
-            `;
-          }).join('')}
+          ${listContentHtml}
         </div>
       </div>
     `;
   }).join('');
 
   elements.basketGroupedContainer.innerHTML = groupHtml;
+
+  // Live Supermarkt-Modus Wagenleiste aktualisieren
+  if (state.storeMode && elements.storeModeLiveBar) {
+    elements.storeModeLiveBar.style.display = 'flex';
+    if (elements.liveBarCheckedCount) {
+      elements.liveBarCheckedCount.textContent = `${checkedCount} von ${totalUnits} Artikeln im Wagen`;
+    }
+    if (elements.liveBarCheckedAmount) {
+      elements.liveBarCheckedAmount.textContent = `${checkedAmount.toFixed(2).replace('.', ',')} € im Wagen`;
+    }
+  } else if (elements.storeModeLiveBar) {
+    elements.storeModeLiveBar.style.display = 'none';
+  }
+
+  // Budget Tracker aktualisieren
+  if (state.budget > 0 && elements.basketBudgetBarBox) {
+    elements.basketBudgetBarBox.style.display = 'block';
+    const effectiveTotal = grandTotal + grandDeposit;
+    const ratio = effectiveTotal / state.budget;
+    const pct = Math.round(ratio * 100);
+    const diff = state.budget - effectiveTotal;
+
+    if (elements.budgetPercentPill) elements.budgetPercentPill.textContent = `${pct}%`;
+    if (elements.budgetProgressFill) elements.budgetProgressFill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+
+    if (diff >= 0) {
+      if (ratio <= 0.80) {
+        if (elements.budgetPercentPill) elements.budgetPercentPill.className = 'budget-pill ok';
+        if (elements.budgetProgressFill) elements.budgetProgressFill.style.background = 'var(--accent-primary)';
+        if (elements.budgetStatusText) elements.budgetStatusText.textContent = `Noch ${diff.toFixed(2).replace('.', ',')} € bis zum Limit`;
+      } else {
+        if (elements.budgetPercentPill) elements.budgetPercentPill.className = 'budget-pill warn';
+        if (elements.budgetProgressFill) elements.budgetProgressFill.style.background = '#f59e0b';
+        if (elements.budgetStatusText) elements.budgetStatusText.textContent = `Fast erreicht: Noch ${diff.toFixed(2).replace('.', ',')} € frei`;
+      }
+    } else {
+      if (elements.budgetPercentPill) elements.budgetPercentPill.className = 'budget-pill danger';
+      if (elements.budgetProgressFill) elements.budgetProgressFill.style.background = '#ef4444';
+      if (elements.budgetStatusText) elements.budgetStatusText.textContent = `⚠️ Limit um ${Math.abs(diff).toFixed(2).replace('.', ',')} € überschritten!`;
+    }
+  } else if (elements.basketBudgetBarBox) {
+    elements.basketBudgetBarBox.style.display = 'none';
+  }
+
+  // Pfand & Gesamtsumme
+  if (grandDeposit > 0) {
+    if (elements.basketDepositRow) {
+      elements.basketDepositRow.style.display = 'flex';
+      elements.basketTotalDeposit.textContent = `+${grandDeposit.toFixed(2).replace('.', ',')} €`;
+    }
+    if (elements.basketGrandTotalWithDepositRow) {
+      elements.basketGrandTotalWithDepositRow.style.display = 'flex';
+      elements.basketGrandTotalWithDeposit.textContent = `${(grandTotal + grandDeposit).toFixed(2).replace('.', ',')} €`;
+    }
+  } else {
+    if (elements.basketDepositRow) elements.basketDepositRow.style.display = 'none';
+    if (elements.basketGrandTotalWithDepositRow) elements.basketGrandTotalWithDepositRow.style.display = 'none';
+  }
 
   // Gesamtsumme & Gesamtersparnis anzeigen
   if (grandTotal > 0) {
@@ -1507,17 +1965,45 @@ function updateFavoritesRadar(offers) {
 function cleanShoppingItemForSearch(raw) {
   if (!raw) return '';
   let clean = String(raw).trim();
-  clean = clean.replace(/^(\d+[.,]\d+|\d+)\s*(g|kg|ml|l|liter|el|tl|bund|dose|dosen|packung|pkg|stk|stück)?\s*/i, '');
+
+  // 1. Spezifische Plural-Klammern auflösen
+  clean = clean.replace(/Tomatenmark/gi, '__TOMATENMARK__');
+  clean = clean.replace(/Tomate\(n\)/gi, 'Tomaten');
+  clean = clean.replace(/Lasagneplatte\(n\)/gi, 'Lasagneplatten');
+  clean = clean.replace(/Knoblauchzehe\(n\)?/gi, 'Knoblauch');
+  clean = clean.replace(/\(n\)/gi, 'n');
+  clean = clean.replace(/\(s\)/gi, 's');
+  clean = clean.replace(/[()]/g, ' ');
+
+  // 2. Mengenangaben & Einheiten am Anfang entfernen
+  clean = clean.replace(/^(\d+[.,]\d+|\d+)\s*(?:liter|litre|flaschen|flasche|gläser|glas|becher|dosen|dose|bund|packung|pckg|pkg|stück|stk|zehen|zehe|msp|prise|tl|el|kg|mg|ml|g|l)\b\s*/i, '');
+  clean = clean.replace(/^(?:ca\.?|circa|etwas|ein|eine|einen)?\s*(\d+[.,]\d+|\d+)?\s*(?:liter|litre|flaschen|flasche|gläser|glas|becher|dosen|dose|bund|packung|pckg|pkg|stück|stk|zehen|zehe|msp|prise|tl|el|kg|mg|ml|g|l)\b\s*/i, '');
+  clean = clean.replace(/^\d+\s+/, '');
+
+  // 3. Koch- & Zubereitungsklauseln entfernen
   const prepPhrases = [
     /\b(zum|beim|fürs?|nach|aus|vom|im|in)\s+(anbraten|braten|kochen|backen|frittieren|grillen|verfeinern|servieren|garnieren|belieben|geschmack|bedarf|form|pfanne|topf)\b/gi,
-    /\b(fein|grob|frisch|gehackt|gewürfelt|gerieben|gemahlen|geschnitten|zerlassen|flüssig|kalt|warm|trocken)\b/gi,
+    /\b(fein|grob|frisch|gehackt|gewürfelt|gerieben|gemahlen|geschnitten|zerlassen|flüssig|kalt|warm|trocken|geschält|geschälte|geschälten|passiert|passierte|passierten)\b/gi,
     /\b(etwas|ca\.?|circa|evtl\.?|eventuell|optional|nach bedarf|nach belieben)\b/gi,
-    /\b(für die form|in der pfanne|im ofen|aus der dose)\b/gi,
+    /\b(für die form|in der pfanne|im ofen|aus der dose|aus dem glas)\b/gi,
   ];
+
   for (const pattern of prepPhrases) {
     clean = clean.replace(pattern, ' ');
   }
+
+  // Französische Akzente ersetzen
+  clean = clean
+    .replace(/[éèêë]/gi, 'e')
+    .replace(/[îï]/gi, 'i')
+    .replace(/[àâ]/gi, 'a')
+    .replace(/[ô]/gi, 'o')
+    .replace(/[ç]/gi, 'c');
+
+  clean = clean.replace(/__TOMATENMARK__/g, 'Tomatenmark');
   clean = clean.replace(/[,;.:\-_/]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // 4. Spezifische Normalisierungen für typische Einkaufszettel-Begriffe
   const lower = clean.toLowerCase();
   if (lower === 'öl' || lower.includes('speiseöl') || lower.includes('pflanzenöl') || lower.includes('bratöl')) {
     return 'Öl';
@@ -1525,6 +2011,19 @@ function cleanShoppingItemForSearch(raw) {
   if (lower.includes('olivenöl')) {
     return 'Olivenöl';
   }
+  if (lower.includes('knoblauch')) {
+    return 'Knoblauch';
+  }
+  if (lower.includes('tomatenmark')) {
+    return 'Tomatenmark';
+  }
+  if (lower.includes('tomate')) {
+    return 'Tomaten';
+  }
+  if (lower.includes('creme fraiche')) {
+    return 'Creme Fraiche';
+  }
+
   return clean || raw;
 }
 
@@ -1537,7 +2036,10 @@ async function optimizeBasket() {
     return;
   }
 
-  const itemNames = state.basket.map(i => cleanShoppingItemForSearch(i.title) || i.title);
+  const itemsPayload = state.basket.map(i => ({
+    query: cleanShoppingItemForSearch(i.title) || i.title,
+    quantity: (typeof i.quantity === 'number' && i.quantity > 0) ? i.quantity : 1,
+  }));
 
   elements.optimizeBasketBtn.disabled = true;
   elements.optimizeBasketBtn.innerHTML = `
@@ -1550,7 +2052,7 @@ async function optimizeBasket() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        items: itemNames,
+        items: itemsPayload,
         zipCode: state.zip,
         excludeAppOnly: state.excludeAppOnly,
         preferReferencePrice: state.sortBy === 'refPrice',
@@ -1724,7 +2226,7 @@ function renderOptimizationResult(opt) {
                     <div class="opt-item-thumb" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.05);font-size:1.1rem;">🛒</div>
                   `}
                   <div class="opt-item-details">
-                    <div class="opt-item-title">${cleanTitle}</div>
+                    <div class="opt-item-title">${it.quantity && it.quantity > 1 ? `<span class="opt-qty-badge" style="background:rgba(0,229,153,0.15); color:var(--accent-primary); padding:0.1rem 0.4rem; border-radius:4px; font-weight:700; margin-right:0.35rem; font-size:0.8rem;">${it.quantity}x</span>` : ''}${cleanTitle}</div>
                     <div class="opt-item-sub">
                       <span class="opt-item-store-tag" data-retailer="${off.retailer}">${off.retailer}</span>
                       <span>für <em>„${it.query}“</em></span>
@@ -1736,8 +2238,8 @@ function renderOptimizationResult(opt) {
                   </div>
                 </label>
                 <div class="opt-item-pricing">
-                  <span class="opt-item-price">${off.formattedPrice || (off.price.toFixed(2).replace('.', ',') + ' €')}</span>
-                  ${off.formattedOldPrice ? `<span class="opt-item-old">${off.formattedOldPrice}</span>` : ''}
+                  <span class="opt-item-price">${it.quantity && it.quantity > 1 ? `${(off.price * it.quantity).toFixed(2).replace('.', ',')} € <small style="font-size:0.75rem; color:var(--text-dim); font-weight:normal;">(${it.quantity}x à ${(off.formattedPrice || (off.price.toFixed(2).replace('.', ',') + ' €'))})</small>` : (off.formattedPrice || (off.price.toFixed(2).replace('.', ',') + ' €'))}</span>
+                  ${off.formattedOldPrice ? `<span class="opt-item-old">${it.quantity && it.quantity > 1 && off.oldPrice ? `${(off.oldPrice * it.quantity).toFixed(2).replace('.', ',')} €` : off.formattedOldPrice}</span>` : ''}
                 </div>
               </div>
 
@@ -1876,7 +2378,7 @@ function applyOptimizedOffersToBasket(selectedItems) {
     });
 
     if (existingIdx !== -1) {
-      const currentQty = state.basket[existingIdx].quantity || 1;
+      const currentQty = state.basket[existingIdx].quantity || item.quantity || 1;
       state.basket[existingIdx] = {
         id: deal.id,
         title: cleanProductTitle(deal.title),
@@ -1901,7 +2403,7 @@ function applyOptimizedOffersToBasket(selectedItems) {
         formattedOldPrice: deal.formattedOldPrice || null,
         isEstimatedOldPrice: deal.isEstimatedOldPrice || false,
         imageUrl: deal.imageUrl || null,
-        quantity: 1,
+        quantity: (typeof item.quantity === 'number' && item.quantity > 0) ? item.quantity : 1,
         checked: false,
       });
     }
@@ -2097,6 +2599,9 @@ function findAllBetterDeals(item) {
     }
     if (typeof o.price !== 'number' || o.price >= item.price) return;
 
+    // Kategorie-Konsistenz prüfen (z. B. keine Drogerie für Molkerei vorschlagen)
+    if (item.categoryId && o.categoryId && item.categoryId !== o.categoryId) return;
+
     // Stringenter Kompatibilitätscheck (z.B. keine Passierten Tomaten für Rispentomaten)
     if (!isCompatibleDeal(item.title, o.title)) return;
 
@@ -2231,7 +2736,7 @@ function closeDealSwapModal() {
  * ==========================================================================
  */
 const ALL_SUPERMARKETS = [
-  'Lidl', 'Aldi Nord', 'Aldi Süd', 'REWE', 'Kaufland',
+  'Lidl', 'Aldi Nord', 'Aldi Süd', 'REWE', 'REWE Center', 'Kaufland',
   'Edeka', 'Penny', 'Netto Marken-Discount', 'Netto mit dem Hund',
   'Norma', 'Alnatura', 'Denns BioMarkt', 'tegut...', 'Globus', 'Hit'
 ];
@@ -2242,6 +2747,13 @@ function initActiveStores() {
   if (!state.activeStores || !Array.isArray(state.activeStores) || state.activeStores.length === 0) {
     state.activeStores = [...ALL_SUPERMARKETS];
     localStorage.setItem('sparfuchs_active_stores', JSON.stringify(state.activeStores));
+  } else {
+    // Migration: Wenn der Nutzer REWE aktiv hatte, aber REWE Center noch fehlt, automatisch ergänzen
+    if (state.activeStores.includes('REWE') && !state.activeStores.includes('REWE Center')) {
+      const idx = state.activeStores.indexOf('REWE');
+      state.activeStores.splice(idx + 1, 0, 'REWE Center');
+      localStorage.setItem('sparfuchs_active_stores', JSON.stringify(state.activeStores));
+    }
   }
   updateStoresBadge();
   renderRetailerChips();
@@ -3142,18 +3654,38 @@ function initEvents() {
     state.query = val;
     state.onlyFavorites = false;
     elements.toggleFavFilterBtn.classList.remove('active');
+    addQueryToSearchHistory(val);
     fetchOffers();
   });
 
-  // Such-Input Clear Button
+  // Such-Input mit 350ms Live-Debounce & Clear Button
+  let searchDebounceTimer = null;
   elements.searchInput.addEventListener('input', () => {
     elements.clearSearchBtn.style.display = elements.searchInput.value ? 'block' : 'none';
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      const val = elements.searchInput.value.trim();
+      if (val.length >= 2 && val !== state.query) {
+        state.query = val;
+        state.onlyFavorites = false;
+        elements.toggleFavFilterBtn.classList.remove('active');
+        addQueryToSearchHistory(val);
+        fetchOffers();
+      } else if (val.length === 0 && state.query !== '') {
+        state.query = '';
+        fetchOffers();
+      }
+    }, 350);
   });
 
   elements.clearSearchBtn.addEventListener('click', () => {
     elements.searchInput.value = '';
     elements.clearSearchBtn.style.display = 'none';
     elements.searchInput.focus();
+    if (state.query !== '') {
+      state.query = '';
+      fetchOffers();
+    }
   });
 
   // Quick Tags
@@ -3193,7 +3725,6 @@ function initEvents() {
   const activateFavoritesFilter = () => {
     state.onlyFavorites = !state.onlyFavorites;
     elements.toggleFavFilterBtn.classList.toggle('active', state.onlyFavorites);
-    if (elements.favQuickBtn) elements.favQuickBtn.classList.toggle('active', state.onlyFavorites);
     if (elements.favoritesSearchTag) elements.favoritesSearchTag.classList.toggle('active', state.onlyFavorites);
 
     if (state.onlyFavorites && state.favorites.length === 0) {
@@ -3203,7 +3734,6 @@ function initEvents() {
   };
 
   elements.toggleFavFilterBtn.addEventListener('click', activateFavoritesFilter);
-  if (elements.favQuickBtn) elements.favQuickBtn.addEventListener('click', activateFavoritesFilter);
   if (elements.favoritesSearchTag) elements.favoritesSearchTag.addEventListener('click', activateFavoritesFilter);
 
   // Food Filter Toggle (komplementär zu Non-Food)
@@ -3521,6 +4051,66 @@ function initEvents() {
   if (elements.clearHistoryBtn) {
     elements.clearHistoryBtn.addEventListener('click', clearAllHistory);
   }
+
+  // Supermarkt-Modus Umschalter
+  if (elements.toggleStoreModeBtn) {
+    elements.toggleStoreModeBtn.addEventListener('click', toggleStoreMode);
+  }
+  if (elements.exitStoreModeBtn) {
+    elements.exitStoreModeBtn.addEventListener('click', toggleStoreMode);
+  }
+
+  // Laufweg-Sortierung Umschalter
+  if (elements.toggleAisleSortBtn) {
+    elements.toggleAisleSortBtn.addEventListener('click', () => {
+      state.aisleSort = !state.aisleSort;
+      if (elements.aisleSortText) {
+        elements.aisleSortText.textContent = state.aisleSort ? 'Laufweg-Sortierung: An 🧭' : 'Laufweg-Sortierung: Aus';
+      }
+      elements.toggleAisleSortBtn.classList.toggle('active', state.aisleSort);
+      showToast(state.aisleSort ? '🧭 Laufweg-Sortierung nach Gängen aktiviert' : 'Laufweg-Sortierung deaktiviert');
+      renderBasket();
+    });
+  }
+
+  // Budget-Eingabe im Warenkorb
+  if (elements.basketBudgetInput) {
+    if (state.budget > 0) {
+      elements.basketBudgetInput.value = state.budget;
+    }
+    elements.basketBudgetInput.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value) || 0;
+      state.budget = val;
+      if (val > 0) {
+        localStorage.setItem('sparfuchs_budget', String(val));
+      } else {
+        localStorage.removeItem('sparfuchs_budget');
+      }
+      renderBasket();
+    });
+  }
+
+  // Drucken Button
+  if (elements.printBasketBtn) {
+    elements.printBasketBtn.addEventListener('click', () => {
+      window.print();
+    });
+  }
+
+  // Suchverlauf leeren
+  if (elements.clearSearchHistoryBtn) {
+    elements.clearSearchHistoryBtn.addEventListener('click', () => {
+      state.searchHistory = [];
+      localStorage.removeItem('sparfuchs_search_history');
+      renderSearchHistoryChips();
+      showToast('Suchverlauf gelöscht');
+    });
+  }
+
+  // CSV Export im Haushaltsplan
+  if (elements.exportCsvBtn) {
+    elements.exportCsvBtn.addEventListener('click', exportHistoryAsCsv);
+  }
 }
 
 /**
@@ -3603,21 +4193,45 @@ function initRecipeToggle() {
   }
 }
 
+// Screen Wake Lock bei Tab-Wechsel reaktivieren (falls im Supermarkt-Modus)
+document.addEventListener('visibilitychange', async () => {
+  if (state.storeMode && document.visibilityState === 'visible' && 'wakeLock' in navigator) {
+    try {
+      state.wakeLock = await navigator.wakeLock.request('screen');
+    } catch (_) {}
+  }
+});
+
+// PWA Service Worker für Offline-Resilienz im Supermarkt registrieren
+if ('serviceWorker' in navigator && (window.location.protocol === 'http:' || window.location.protocol === 'https:')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(err => {
+      console.warn('ServiceWorker-Registrierung nicht möglich:', err);
+    });
+  });
+}
+
 // Initialisierung beim Laden
 document.addEventListener('DOMContentLoaded', () => {
   elements.plzInput.value = state.zip;
   elements.searchInput.value = state.query;
   elements.clearSearchBtn.style.display = state.query ? 'block' : 'none';
   
+  if (elements.basketBudgetInput && state.budget > 0) {
+    elements.basketBudgetInput.value = state.budget;
+  }
+
   initActiveStores();
   initEvents();
   initDrawerResizing();
   initRecipeToggle();
   renderFavoritesBadge();
+  renderSearchHistoryChips();
   renderBasket();
   fetchAndRenderHistory();
   loadCategories();
   fetchOffers();
   checkForIncomingBasketShare();
 });
+
 
