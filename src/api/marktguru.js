@@ -83,15 +83,21 @@ export function normalizeOffer(entry, defaultQuery = '') {
   }
 
   const id = String(entry.id || '');
-  const brandName = entry.brand?.name || null;
+  let brandName = entry.brand?.name || null;
+  if (brandName && brandName.toLowerCase() === 'thisisnobrand123') {
+    brandName = 'Eigenmarke';
+  }
+
   const productName = entry.product?.name || null;
   const rawDesc = entry.description || '';
 
   // Titel zusammensetzen: Wenn Marke vorhanden, oft Kombination aus Marke & Produkt
-  let title = productName || rawDesc || brandName || 'Unbenanntes Angebot';
-  if (brandName && productName && !productName.toLowerCase().includes(brandName.toLowerCase())) {
+  let title = productName || rawDesc || (brandName && brandName !== 'Eigenmarke' ? brandName : '') || 'Unbenanntes Angebot';
+  if (brandName && brandName !== 'Eigenmarke' && productName && !productName.toLowerCase().includes(brandName.toLowerCase())) {
     title = `${brandName} ${productName}`;
   }
+  title = title.replace(/\bthisisnobrand123\b/gi, '').replace(/\s+/g, ' ').trim();
+  if (!title) title = 'Eigenmarke';
 
   // Händler
   let retailer = 'Unbekannt';
@@ -101,6 +107,15 @@ export function normalizeOffer(entry, defaultQuery = '') {
     retailerSlug = entry.advertisers[0].uniqueName || '';
   } else if (entry.retailerName) {
     retailer = entry.retailerName;
+  }
+
+  // Präzise Differenzierung zwischen "REWE" und "REWE Center"
+  if (retailerSlug === 'rewe-center' || /\brewe[- ]center\b/i.test(retailer)) {
+    retailer = 'REWE Center';
+    retailerSlug = 'rewe-center';
+  } else if (retailerSlug === 'rewe' || retailer.toLowerCase() === 'rewe') {
+    retailer = 'REWE';
+    retailerSlug = 'rewe';
   }
 
   // Non-Food und Bio vorab ermitteln für Preis-Validierung
