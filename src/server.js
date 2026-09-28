@@ -10,7 +10,7 @@ import { searchOffers } from './api/marktguru.js';
 import { searchAldiNordOffers } from './api/aldinord.js';
 import { searchNormaOffers } from './api/norma.js';
 import { searchEdekaOffers } from './api/edeka.js';
-import { filterAndSortOffers, calculateBasketTotals } from './engine/comparator.js';
+import { filterAndSortOffers, calculateBasketTotals, isMatchingRetailer } from './engine/comparator.js';
 import { optimizeBasket, sanitizeItemForSearch } from './engine/optimizer.js';
 import { loadHistoryFromFile, saveHistoryToFile, calculateHouseholdStats } from './engine/history.js';
 import { CATEGORY_DEFINITIONS } from './engine/categories.js';
@@ -27,7 +27,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Top-Supermarktketten in Marktguru für einen reichhaltigen "Alle Angebote"-Feed
-const MARKTGURU_STORES = ['Lidl', 'REWE', 'PENNY', 'Netto', 'Kaufland'];
+const MARKTGURU_STORES = ['Lidl', 'REWE', 'REWE Center', 'PENNY', 'Netto', 'Kaufland'];
 
 // Ermittelt die lokale LAN-IPv4-Adresse des PCs (für WLAN-Transfer im lokalen Netzwerk)
 export function getLocalIpAddress() {
@@ -98,13 +98,12 @@ export function createApp() {
       const activeStoreListLower = activeStoreList.map(r => r.toLowerCase());
 
       const shouldIncludeStore = (name) => {
-        const n = name.toLowerCase();
-        if (activeStoreListLower.length > 0) {
-          const isAllowed = activeStoreListLower.some(r => n.includes(r) || r.includes(n));
+        if (activeStoreList.length > 0) {
+          const isAllowed = activeStoreList.some(r => isMatchingRetailer(name, '', r));
           if (!isAllowed) return false;
         }
-        if (retailerListLower.length === 0) return true;
-        return retailerListLower.some(r => n.includes(r) || r.includes(n));
+        if (retailerList.length === 0) return true;
+        return retailerList.some(r => isMatchingRetailer(name, '', r));
       };
 
       let combinedOffers = [];
@@ -161,13 +160,14 @@ export function createApp() {
           for (const ret of retailerList) {
             const retLower = ret.toLowerCase();
             let mgQuery = ret;
-            if (retLower.includes('penny')) mgQuery = 'PENNY';
+            if (retLower === 'rewe center' || retLower.includes('rewe center')) mgQuery = 'REWE Center';
+            else if (retLower.includes('rewe')) mgQuery = 'REWE';
+            else if (retLower.includes('penny')) mgQuery = 'PENNY';
             else if (retLower.includes('netto')) mgQuery = 'Netto';
             else if (retLower.includes('lidl')) mgQuery = 'Lidl';
-            else if (retLower.includes('rewe')) mgQuery = 'REWE';
             else if (retLower.includes('kaufland')) mgQuery = 'Kaufland';
 
-            if (['PENNY', 'Netto', 'Lidl', 'REWE', 'Kaufland'].includes(mgQuery)) {
+            if (['PENNY', 'Netto', 'Lidl', 'REWE', 'REWE Center', 'Kaufland'].includes(mgQuery)) {
               fetchTasks.push(
                 searchOffers({ query: mgQuery, zipCode: zip, limit: 100 })
                   .then(r => addOffers(r.offers))
@@ -307,12 +307,29 @@ export function createApp() {
         return res.status(400).json({ error: 'items muss ein nicht-leeres Array von Suchbegriffen sein.' });
       }
 
-      // Artikel bereinigen und Dubletten entfernen
-      const cleanItems = [...new Set(items.map(item => String(item).trim()).filter(Boolean))];
+      // Unterstütze sowohl Strings (abwärtskompatibel) als auch Objekte { query, quantity } / { title, quantity }
+      const parsedItems = items.map(it => {
+        if (typeof it === 'string') {
+          return { query: it.trim(), quantity: 1 };
+        }
+        if (it && typeof it === 'object') {
+          const q = String(it.query || it.title || '').trim();
+          const qty = (typeof it.quantity === 'number' && it.quantity > 0) ? it.quantity : 1;
+          return { query: q, quantity: qty };
+        }
+        return null;
+      }).filter(it => it && it.query);
 
-      if (cleanItems.length === 0) {
+      if (parsedItems.length === 0) {
         return res.status(400).json({ error: 'Keine gültigen Artikel angegeben.' });
       }
+
+      // Dubletten zusammenführen und Mengen aufsummieren
+      const quantitiesMap = {};
+      for (const { query, quantity } of parsedItems) {
+        quantitiesMap[query] = (quantitiesMap[query] || 0) + quantity;
+      }
+      const cleanItems = Object.keys(quantitiesMap);
 
       const isStoreAllowed = (name) => {
         if (!effectiveRetailers || effectiveRetailers.length === 0) return true;
@@ -362,6 +379,7 @@ export function createApp() {
 
       const optimization = optimizeBasket(cleanItems, itemResultsMap, {
         retailers: effectiveRetailers,
+        quantities: quantitiesMap,
         excludeAppOnly,
         preferReferencePrice,
       });
