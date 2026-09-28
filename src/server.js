@@ -10,6 +10,7 @@ import { searchOffers } from './api/marktguru.js';
 import { searchAldiNordOffers } from './api/aldinord.js';
 import { searchNormaOffers } from './api/norma.js';
 import { searchEdekaOffers } from './api/edeka.js';
+import { searchNettoMitHundOffers } from './api/nettomithund.js';
 import { filterAndSortOffers, calculateBasketTotals, isMatchingRetailer } from './engine/comparator.js';
 import { optimizeBasket, sanitizeItemForSearch } from './engine/optimizer.js';
 import { loadHistoryFromFile, saveHistoryToFile, calculateHouseholdStats } from './engine/history.js';
@@ -27,7 +28,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Top-Supermarktketten in Marktguru für einen reichhaltigen "Alle Angebote"-Feed
-const MARKTGURU_STORES = ['Lidl', 'REWE', 'REWE Center', 'PENNY', 'Netto', 'Kaufland'];
+const MARKTGURU_STORES = ['Lidl', 'REWE', 'REWE Center', 'PENNY', 'Netto', 'Kaufland', 'EDEKA', 'ALDI SÜD'];
 
 // Ermittelt die lokale LAN-IPv4-Adresse des PCs (für WLAN-Transfer im lokalen Netzwerk)
 export function getLocalIpAddress() {
@@ -147,6 +148,13 @@ export function createApp() {
           }));
         }
 
+        // 4. Netto mit dem Hund (falls nicht ausgeschlossen)
+        if (shouldIncludeStore('Netto mit dem Hund')) {
+          fetchTasks.push(searchNettoMitHundOffers('', zip).then(addOffers).catch(err => {
+            console.warn('Netto mit dem Hund Feed Fehler:', err.message);
+          }));
+        }
+
         // 4. Marktguru Angebote holen
         if (isBioOnly) {
           // Wenn "Nur Bio" aktiv ist: gezielt Bio-Angebote bei Marktguru abfragen (Penny, Kaufland, Lidl, REWE etc.)
@@ -163,17 +171,19 @@ export function createApp() {
             if (retLower === 'rewe center' || retLower.includes('rewe center')) mgQuery = 'REWE Center';
             else if (retLower.includes('rewe')) mgQuery = 'REWE';
             else if (retLower.includes('penny')) mgQuery = 'PENNY';
-            else if (retLower.includes('netto')) mgQuery = 'Netto';
+            else if (retLower.includes('netto marken') || retLower === 'netto') mgQuery = 'Netto';
             else if (retLower.includes('lidl')) mgQuery = 'Lidl';
             else if (retLower.includes('kaufland')) mgQuery = 'Kaufland';
+            else if (retLower.includes('edeka center') || retLower === 'e center') mgQuery = 'E center';
+            else if (retLower.includes('edeka')) mgQuery = 'EDEKA';
+            else if (retLower.includes('aldi süd') || retLower.includes('aldi sued')) mgQuery = 'ALDI SÜD';
+            else if (retLower === 'aldi' || retLower === 'aldi nord') mgQuery = 'Aldi';
 
-            if (['PENNY', 'Netto', 'Lidl', 'REWE', 'REWE Center', 'Kaufland'].includes(mgQuery)) {
-              fetchTasks.push(
-                searchOffers({ query: mgQuery, zipCode: zip, limit: 100 })
-                  .then(r => addOffers(r.offers))
-                  .catch(err => console.warn(`Marktguru Feed Fehler für ${mgQuery}:`, err.message))
-              );
-            }
+            fetchTasks.push(
+              searchOffers({ query: mgQuery, zipCode: zip, limit: 100 })
+                .then(r => addOffers(r.offers))
+                .catch(err => console.warn(`Marktguru Feed Fehler für ${mgQuery}:`, err.message))
+            );
           }
         } else {
           // Alle Märkte: Parallele Händler-Abfragen in Marktguru für maximale Angebotsvielfalt
@@ -232,6 +242,15 @@ export function createApp() {
             searchEdekaOffers(searchQuery, zip)
               .then(addOffers)
               .catch(err => console.warn('EDEKA Suche Fehler:', err.message))
+          );
+        }
+
+        // 5. Netto mit dem Hund
+        if (shouldIncludeStore('Netto mit dem Hund')) {
+          fetchTasks.push(
+            searchNettoMitHundOffers(searchQuery, zip)
+              .then(addOffers)
+              .catch(err => console.warn('Netto mit dem Hund Suche Fehler:', err.message))
           );
         }
 
