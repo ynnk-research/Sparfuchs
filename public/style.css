@@ -779,6 +779,7 @@ input, select {
 
 /* Retailer chip individual accents */
 .chip-retailer[data-retailer="Aldi Nord"].active { background: #002b80; color: #ffffff; border-color: #0070d2; box-shadow: 0 0 12px rgba(0, 112, 210, 0.35); }
+.chip-retailer[data-retailer="Aldi Süd"].active { background: #002b80; color: #ff9900; border-color: #ff9900; box-shadow: 0 0 12px rgba(255, 153, 0, 0.35); }
 .chip-retailer[data-retailer="Lidl"].active { background: #ffd000; color: #003082; border-color: #ffd000; }
 .chip-retailer[data-retailer="REWE"].active { background: #cc071e; color: #ffffff; border-color: #cc071e; }
 .chip-retailer[data-retailer="REWE Center"].active { background: #8b0000; color: #ffffff; border-color: #ff3b53; box-shadow: 0 0 12px rgba(255, 59, 83, 0.4); }
@@ -786,6 +787,8 @@ input, select {
 .chip-retailer[data-retailer="Kaufland"].active { background: #e30613; color: #ffffff; border-color: #e30613; }
 .chip-retailer[data-retailer="Edeka"].active { background: #004b9b; color: #ffdc00; border-color: #004b9b; }
 .chip-retailer[data-retailer="Penny"].active { background: #cd141e; color: #ffffff; border-color: #cd141e; }
+.chip-retailer[data-retailer="Netto Marken-Discount"].active { background: #ffcc00; color: #d00000; border-color: #d00000; }
+.chip-retailer[data-retailer="Netto mit dem Hund"].active { background: #1a1a1a; color: #fad85b; border-color: #fad85b; box-shadow: 0 0 12px rgba(250, 216, 91, 0.45); }
 
 /* ==========================================================================
    Results & Cards View
@@ -943,6 +946,12 @@ input, select {
   border-color: #ff3b53;
   color: #ff8595;
   background: rgba(139, 0, 0, 0.7);
+}
+
+.badge-retailer[data-retailer="Netto mit dem Hund"] {
+  border-color: #fad85b;
+  color: #fad85b;
+  background: rgba(26, 26, 26, 0.9);
 }
 
 .badge-discount-percent {
@@ -5038,7 +5047,10 @@ body.store-mode-active .basket-drawer {
 .opt-alt-badge[data-retailer*="REWE Center"] { background: #8b0000; color: #ffcccc; border: 1px solid #ff3b53; }
 .opt-alt-badge[data-retailer*="Kaufland"] { background: #e30613; color: #ffffff; }
 .opt-alt-badge[data-retailer*="Penny"] { background: #cd141e; color: #ffffff; }
-.opt-alt-badge[data-retailer*="Netto"] { background: #ffcc00; color: #d00000; }
+.opt-alt-badge[data-retailer*="Netto Marken-Discount"],
+.opt-alt-badge[data-retailer="Netto"] { background: #ffcc00; color: #d00000; }
+.opt-alt-badge[data-retailer="Netto mit dem Hund"],
+.opt-alt-badge[data-retailer*="Hund"] { background: #1a1a1a; color: #fad85b; border: 1px solid #fad85b; }
 .opt-alt-badge[data-retailer*="Edeka"] { background: #004b9b; color: #ffdc00; }
 .opt-alt-badge[data-retailer*="Norma"] { background: #e30613; color: #ffd000; }
 

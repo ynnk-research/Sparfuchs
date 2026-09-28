@@ -2738,22 +2738,36 @@ function closeDealSwapModal() {
 const ALL_SUPERMARKETS = [
   'Lidl', 'Aldi Nord', 'Aldi Süd', 'REWE', 'REWE Center', 'Kaufland',
   'Edeka', 'Penny', 'Netto Marken-Discount', 'Netto mit dem Hund',
-  'Norma', 'Alnatura', 'Denns BioMarkt', 'tegut...', 'Globus', 'Hit'
+  'Norma'
 ];
 
 const DISCOUNTER_STORES = ['Lidl', 'Aldi Nord', 'Aldi Süd', 'Penny', 'Netto Marken-Discount', 'Netto mit dem Hund', 'Norma'];
+
+const DISCONTINUED_STORES = ['Alnatura', 'Denns BioMarkt', 'tegut...', 'Globus', 'Hit'];
 
 function initActiveStores() {
   if (!state.activeStores || !Array.isArray(state.activeStores) || state.activeStores.length === 0) {
     state.activeStores = [...ALL_SUPERMARKETS];
     localStorage.setItem('sparfuchs_active_stores', JSON.stringify(state.activeStores));
   } else {
+    // Bereinigung: Veraltete Märkte ohne API-Angebote entfernen
+    state.activeStores = state.activeStores.filter(s => !DISCONTINUED_STORES.includes(s));
+
     // Migration: Wenn der Nutzer REWE aktiv hatte, aber REWE Center noch fehlt, automatisch ergänzen
     if (state.activeStores.includes('REWE') && !state.activeStores.includes('REWE Center')) {
       const idx = state.activeStores.indexOf('REWE');
       state.activeStores.splice(idx + 1, 0, 'REWE Center');
-      localStorage.setItem('sparfuchs_active_stores', JSON.stringify(state.activeStores));
     }
+    // Migration: Netto mit dem Hund ergänzen falls fehlt
+    if (!state.activeStores.includes('Netto mit dem Hund')) {
+      const idx = state.activeStores.indexOf('Netto Marken-Discount');
+      if (idx !== -1) {
+        state.activeStores.splice(idx + 1, 0, 'Netto mit dem Hund');
+      } else {
+        state.activeStores.push('Netto mit dem Hund');
+      }
+    }
+    localStorage.setItem('sparfuchs_active_stores', JSON.stringify(state.activeStores));
   }
   updateStoresBadge();
   renderRetailerChips();
