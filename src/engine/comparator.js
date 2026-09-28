@@ -252,7 +252,7 @@ export function isMatchingRetailer(offerRetailer, offerSlug = '', filterRetailer
   // Strikte Unterscheidung: "REWE" vs. "REWE Center"
   if (f === 'rewe') {
     // REWE Filter darf NICHT auf REWE Center matchen!
-    return (oName === 'rewe' || oSlug === 'rewe') &&
+    return (oName.includes('rewe') || oSlug.includes('rewe')) &&
            !oName.includes('center') &&
            !oSlug.includes('center');
   }
@@ -263,7 +263,7 @@ export function isMatchingRetailer(offerRetailer, offerSlug = '', filterRetailer
 
   // Strikte Unterscheidung: "Edeka" vs. "Edeka Center"
   if (f === 'edeka') {
-    return (oName === 'edeka' || oSlug === 'edeka') &&
+    return (oName.includes('edeka') || oSlug.includes('edeka')) &&
            !oName.includes('center') &&
            !oSlug.includes('center');
   }
@@ -272,7 +272,26 @@ export function isMatchingRetailer(offerRetailer, offerSlug = '', filterRetailer
            (oSlug.includes('edeka') && oSlug.includes('center'));
   }
 
-  // Mehrwort-Ketten (z.B. "Aldi Nord", "Netto Marken-Discount")
+  // Strikte Unterscheidung: "Aldi Süd" vs. "Aldi Nord"
+  if (f === 'aldi sued' || f === 'aldi süd') {
+    return (oName.includes('süd') || oName.includes('sued') || oSlug.includes('sued') || oSlug.includes('süd')) &&
+           !oName.includes('nord') && !oSlug.includes('nord');
+  }
+  if (f === 'aldi nord') {
+    return (oName.includes('nord') || oSlug.includes('nord')) &&
+           !oName.includes('süd') && !oName.includes('sued') && !oSlug.includes('sued');
+  }
+
+  // Strikte Unterscheidung: "Netto Marken-Discount" vs. "Netto mit dem Hund"
+  if (f.includes('hund') || f.includes('scottie')) {
+    return oName.includes('hund') || oName.includes('scottie') || oSlug.includes('scottie') || oSlug.includes('hund') || oSlug.includes('aps');
+  }
+  if (f === 'netto marken-discount' || f === 'netto') {
+    return (oName.includes('netto') || oSlug.includes('netto')) &&
+           !oName.includes('hund') && !oName.includes('scottie') && !oSlug.includes('scottie') && !oSlug.includes('hund');
+  }
+
+  // Mehrwort-Ketten (z.B. "Netto Marken-Discount")
   if (f.includes(' ') || f.includes('-')) {
     return oName.includes(f) || oSlug.includes(f);
   }
