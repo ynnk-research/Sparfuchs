@@ -130,3 +130,34 @@ export function filterOffersByCategory(offers = [], categoryId = 'all') {
     return c.categoryId === categoryId;
   });
 }
+
+/**
+ * Standard-Supermarkt-Laufweg nach Gängen (von Eingang zu Kasse):
+ * 1. Obst & Gemüse (Eingangsbereich)
+ * 2. Fleisch & Fisch (Frischetheke)
+ * 3. Molkerei & Eier (Kühlregal)
+ * 4. Vorrat & Grundnahrungsmittel (Trockensortiment & Brot)
+ * 5. Süßes & Snacks
+ * 6. Kaffee & Getränke (oft vor Kasse oder Getränkemarkt)
+ * 7. Drogerie & Aktionsware / Non-Food
+ * 8. Sonstiges
+ */
+export const AISLE_ORDER = [
+  'produce',
+  'meat',
+  'dairy',
+  'pantry',
+  'snacks',
+  'drinks',
+  'nonfood',
+  'other',
+];
+
+/**
+ * Liefert den numerischen Sortier-Index für den Markt-Laufweg (1-basiert)
+ */
+export function getAisleSortOrder(categoryId) {
+  const idx = AISLE_ORDER.indexOf(categoryId);
+  return idx >= 0 ? idx + 1 : AISLE_ORDER.length + 1;
+}
+

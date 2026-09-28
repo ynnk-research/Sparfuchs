@@ -3,7 +3,7 @@
  * Berechnet die kostengünstigste Einkaufsstrategie für mehrere Artikel.
  */
 
-import { filterAndSortOffers, getStandardizedReferencePrice, isGenuineSupermarket } from './comparator.js';
+import { filterAndSortOffers, getStandardizedReferencePrice, isGenuineSupermarket, isMatchingRetailer } from './comparator.js';
 
 /**
  * Bereinigt einen Einkaufslisten-Eintrag für die Supermarkt-Suche
@@ -162,8 +162,7 @@ export function getTopAlternativesForItem(query, allOffers, chosenOffer = null, 
     if (options.excludeAppOnly && o.requiresApp) return false;
 
     if (allowedClean.length > 0) {
-      const retLower = (o.retailer || '').toLowerCase();
-      const isAllowed = allowedClean.some(al => retLower.includes(al) || al.includes(retLower));
+      const isAllowed = allowedClean.some(al => isMatchingRetailer(o.retailer, o.retailerSlug, al));
       if (!isAllowed) return false;
     }
     return true;
@@ -229,8 +228,7 @@ export function analyzeStoreCoverage(itemQueries, itemResultsMap, options = {}) 
     for (const offer of offers) {
       if (offer.retailer && isGenuineSupermarket(offer.retailer)) {
         if (allowedClean.length > 0) {
-          const retLower = offer.retailer.toLowerCase();
-          const isAllowed = allowedClean.some(al => retLower.includes(al) || al.includes(retLower));
+          const isAllowed = allowedClean.some(al => isMatchingRetailer(offer.retailer, offer.retailerSlug, al));
           if (!isAllowed) continue;
         }
         allRetailers.add(offer.retailer);
@@ -239,6 +237,7 @@ export function analyzeStoreCoverage(itemQueries, itemResultsMap, options = {}) 
   }
 
   const storeSummaries = [];
+  const quantities = options.quantities || {};
 
   for (const store of allRetailers) {
     const matchedItems = [];
@@ -247,6 +246,7 @@ export function analyzeStoreCoverage(itemQueries, itemResultsMap, options = {}) 
     let totalSavings = 0;
 
     for (const query of itemQueries) {
+      const qty = (typeof quantities[query] === 'number' && quantities[query] > 0) ? quantities[query] : 1;
       const offers = itemResultsMap[query] || [];
       const best = getBestOfferForStore(offers, store, options, query);
 
@@ -254,12 +254,13 @@ export function analyzeStoreCoverage(itemQueries, itemResultsMap, options = {}) 
         const alternatives = getTopAlternativesForItem(query, offers, best, options);
         matchedItems.push({
           query,
+          quantity: qty,
           offer: best,
           alternatives,
         });
-        totalPrice += best.price;
+        totalPrice += best.price * qty;
         if (best.oldPrice && best.oldPrice > best.price) {
-          totalSavings += (best.oldPrice - best.price);
+          totalSavings += (best.oldPrice - best.price) * qty;
         }
       } else {
         missingItems.push(query);
@@ -305,6 +306,7 @@ export function calculateSmartSplit(itemQueries, itemResultsMap, storeSummaries,
     return null;
   }
 
+  const quantities = options.quantities || {};
   // Wir testen alle 2er-Kombinationen der Top-Händler (begrenzt auf Top 8 zur Performance-Optimierung)
   const candidateStores = storeSummaries.slice(0, 8).map(s => s.retailer);
   let bestSplit = null;
@@ -323,6 +325,7 @@ export function calculateSmartSplit(itemQueries, itemResultsMap, storeSummaries,
       let totalSavings = 0;
 
       for (const query of itemQueries) {
+        const qty = (typeof quantities[query] === 'number' && quantities[query] > 0) ? quantities[query] : 1;
         const offers = itemResultsMap[query] || [];
         const offerA = getBestOfferForStore(offers, storeA, options, query);
         const offerB = getBestOfferForStore(offers, storeB, options, query);
@@ -363,13 +366,14 @@ export function calculateSmartSplit(itemQueries, itemResultsMap, storeSummaries,
 
         splitAllocation[chosenStore].push({
           query,
+          quantity: qty,
           offer: chosenOffer,
           alternatives,
         });
 
-        totalSplitPrice += chosenOffer.price;
+        totalSplitPrice += chosenOffer.price * qty;
         if (chosenOffer.oldPrice && chosenOffer.oldPrice > chosenOffer.price) {
-          totalSavings += (chosenOffer.oldPrice - chosenOffer.price);
+          totalSavings += (chosenOffer.oldPrice - chosenOffer.price) * qty;
         }
       }
 
@@ -379,11 +383,13 @@ export function calculateSmartSplit(itemQueries, itemResultsMap, storeSummaries,
       // Treffer für fehlende Artikel bei anderen aktiven Märkten sammeln (damit kein Artikel verloren geht!)
       const otherStoreMatches = [];
       for (const mQuery of missingItems) {
+        const qty = (typeof quantities[mQuery] === 'number' && quantities[mQuery] > 0) ? quantities[mQuery] : 1;
         const mOffers = itemResultsMap[mQuery] || [];
         const altBest = getTopAlternativesForItem(mQuery, mOffers, null, options);
         if (altBest.length > 0) {
           otherStoreMatches.push({
             query: mQuery,
+            quantity: qty,
             offer: altBest[0],
             alternatives: altBest.slice(1, 4),
           });
@@ -396,13 +402,13 @@ export function calculateSmartSplit(itemQueries, itemResultsMap, storeSummaries,
           [storeA]: {
             items: splitAllocation[storeA],
             subtotal: parseFloat(
-              splitAllocation[storeA].reduce((sum, item) => sum + item.offer.price, 0).toFixed(2)
+              splitAllocation[storeA].reduce((sum, item) => sum + (item.offer.price * (item.quantity || 1)), 0).toFixed(2)
             ),
           },
           [storeB]: {
             items: splitAllocation[storeB],
             subtotal: parseFloat(
-              splitAllocation[storeB].reduce((sum, item) => sum + item.offer.price, 0).toFixed(2)
+              splitAllocation[storeB].reduce((sum, item) => sum + (item.offer.price * (item.quantity || 1)), 0).toFixed(2)
             ),
           },
         },
@@ -437,15 +443,18 @@ export function optimizeBasket(itemQueries, itemResultsMap, options = {}) {
   const storeSummaries = analyzeStoreCoverage(itemQueries, itemResultsMap, options);
   const singleStoreChampion = calculateSingleStoreChampion(itemQueries, storeSummaries);
   const smartSplit = calculateSmartSplit(itemQueries, itemResultsMap, storeSummaries, options);
+  const quantities = options.quantities || {};
 
   // Bestes Angebot je Artikel über alle aktiven Supermärkte
   const bestPerItem = [];
   for (const query of itemQueries) {
+    const qty = (typeof quantities[query] === 'number' && quantities[query] > 0) ? quantities[query] : 1;
     const offers = itemResultsMap[query] || [];
     const topOffers = getTopAlternativesForItem(query, offers, null, options);
     if (topOffers.length > 0) {
       bestPerItem.push({
         query,
+        quantity: qty,
         offer: topOffers[0],
         alternatives: topOffers.slice(1, 4),
       });

@@ -31,41 +31,142 @@ export function validateAndSanitizeOldPrice(price, oldPrice, isNonFood = false) 
 }
 
 /**
+ * Extrahiert Menge, Einheit und Basisnormierung aus Textangaben
+ * (z. B. "250 g", "500g", "1,5 l", "6 x 0,5 l", "10 Stück")
+ */
+export function extractPackageAmountAndUnit(str = '', title = '', description = '') {
+  const combined = `${str || ''} ${title || ''} ${description || ''}`.trim();
+  if (!combined) return null;
+
+  // 1. Multipacks / Gebinde prüfen (z. B. "6 x 0,5 l", "20 x 0,5 l", "6x330ml", "4x100g")
+  const multiMatch = combined.match(/(\d+)\s*[xX*]\s*(\d+(?:[.,]\d+)?)\s*(kg|g|gramm|l|liter|litre|ml|milliliter)\b/i);
+  if (multiMatch) {
+    const count = parseInt(multiMatch[1], 10);
+    const amountPerUnit = parseFloat(multiMatch[2].replace(',', '.'));
+    const unitRaw = multiMatch[3].toLowerCase();
+    let baseUnit = 'kg';
+    let baseAmount = 0;
+
+    if (unitRaw === 'g' || unitRaw === 'gramm') {
+      baseAmount = (count * amountPerUnit) / 1000;
+      baseUnit = 'kg';
+    } else if (unitRaw === 'kg') {
+      baseAmount = count * amountPerUnit;
+      baseUnit = 'kg';
+    } else if (unitRaw === 'ml' || unitRaw === 'milliliter') {
+      baseAmount = (count * amountPerUnit) / 1000;
+      baseUnit = 'l';
+    } else if (unitRaw === 'l' || unitRaw === 'liter' || unitRaw === 'litre') {
+      baseAmount = count * amountPerUnit;
+      baseUnit = 'l';
+    }
+
+    if (baseAmount > 0) {
+      return { baseAmount, baseUnit, rawAmount: count * amountPerUnit, rawUnit: unitRaw };
+    }
+  }
+
+  // 2. Einzelpackungsmuster (z. B. "250-g-Pckg.", "250 g", "500g", "1,5 l", "750 ml", "1 kg")
+  const searchTexts = [str, description, title].filter(Boolean);
+  for (const text of searchTexts) {
+    const singleMatch = text.match(/(\d+(?:[.,]\d+)?)\s*(?:-|\s)?(kg|g|gramm|l|liter|litre|ml|milliliter)\b/i);
+    if (singleMatch) {
+      const amount = parseFloat(singleMatch[1].replace(',', '.'));
+      const unitRaw = singleMatch[2].toLowerCase();
+      let baseAmount = 0;
+      let baseUnit = 'kg';
+
+      if (unitRaw === 'g' || unitRaw === 'gramm') {
+        baseAmount = amount / 1000;
+        baseUnit = 'kg';
+      } else if (unitRaw === 'kg') {
+        baseAmount = amount;
+        baseUnit = 'kg';
+      } else if (unitRaw === 'ml' || unitRaw === 'milliliter') {
+        baseAmount = amount / 1000;
+        baseUnit = 'l';
+      } else if (unitRaw === 'l' || unitRaw === 'liter' || unitRaw === 'litre') {
+        baseAmount = amount;
+        baseUnit = 'l';
+      }
+
+      if (baseAmount > 0) {
+        return { baseAmount, baseUnit, rawAmount: amount, rawUnit: unitRaw };
+      }
+    }
+  }
+
+  // 3. Stück-Angaben (z.B. "10 Stück", "6er Packung", "10 Eier")
+  for (const text of searchTexts) {
+    const pieceMatch = text.match(/(\d+)\s*(?:stück|stk|er\s*pack|eier|beutel|rollen|flaschen|dosen)\b/i);
+    if (pieceMatch) {
+      const count = parseInt(pieceMatch[1], 10);
+      if (count > 0) {
+        return { baseAmount: count, baseUnit: 'Stück', rawAmount: count, rawUnit: 'Stück' };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Standardisiert den Grundpreis auf Basiseinheiten (kg, l, Stück),
- * falls abweichende Einheiten wie g oder ml angegeben sind.
+ * falls abweichende Einheiten wie g oder ml angegeben sind,
+ * oder berechnet ihn aus den Mengenangaben, falls er vom Händler nicht bereitgestellt wurde.
  */
 export function getStandardizedReferencePrice(offer) {
-  if (!offer || typeof offer.referencePrice !== 'number' || isNaN(offer.referencePrice)) {
-    // Wenn kein Grundpreis vorhanden ist, nutzen wir den Endpreis als Fallback
+  if (!offer) {
+    return { pricePerBaseUnit: Infinity, baseUnit: 'Stück', isEstimated: true };
+  }
+
+  // 1. Wenn expliziter Grundpreis vorhanden ist
+  if (typeof offer.referencePrice === 'number' && !isNaN(offer.referencePrice) && offer.referencePrice > 0) {
+    const unit = (offer.referenceUnit || '').toLowerCase().trim();
+    let factor = 1;
+    let baseUnit = unit;
+
+    if (unit === 'g' || unit === 'gramm') {
+      factor = 1000;
+      baseUnit = 'kg';
+    } else if (unit === '100g' || unit === '100 g') {
+      factor = 10;
+      baseUnit = 'kg';
+    } else if (unit === 'ml' || unit === 'milliliter') {
+      factor = 1000;
+      baseUnit = 'l';
+    } else if (unit === '100ml' || unit === '100 ml') {
+      factor = 10;
+      baseUnit = 'l';
+    }
+
     return {
-      pricePerBaseUnit: typeof offer?.price === 'number' ? offer.price : Infinity,
-      baseUnit: offer?.referenceUnit || 'Stück',
-      isEstimated: true,
+      pricePerBaseUnit: parseFloat((offer.referencePrice * factor).toFixed(2)),
+      baseUnit: baseUnit || 'kg',
+      isEstimated: false,
     };
   }
 
-  const unit = (offer.referenceUnit || '').toLowerCase().trim();
-  let factor = 1;
-  let baseUnit = unit;
-
-  if (unit === 'g' || unit === 'gramm') {
-    factor = 1000;
-    baseUnit = 'kg';
-  } else if (unit === '100g' || unit === '100 g') {
-    factor = 10;
-    baseUnit = 'kg';
-  } else if (unit === 'ml' || unit === 'milliliter') {
-    factor = 1000;
-    baseUnit = 'l';
-  } else if (unit === '100ml' || unit === '100 ml') {
-    factor = 10;
-    baseUnit = 'l';
+  // 2. Fallback: Versuch, Packungsgröße aus packageSize, title oder description zu extrahieren
+  const offerPrice = typeof offer.price === 'number' ? offer.price : parseFloat(offer.price);
+  if (typeof offerPrice === 'number' && offerPrice > 0) {
+    const pkg = extractPackageAmountAndUnit(offer.packageSize, offer.title, offer.description);
+    if (pkg && pkg.baseAmount > 0) {
+      const calcRef = parseFloat((offerPrice / pkg.baseAmount).toFixed(2));
+      return {
+        pricePerBaseUnit: calcRef,
+        baseUnit: pkg.baseUnit,
+        isEstimated: false,
+        extractedPackage: pkg,
+      };
+    }
   }
 
+  // 3. Wenn kein Grundpreis vorhanden und keine Menge ermittelbar ist
   return {
-    pricePerBaseUnit: offer.referencePrice * factor,
-    baseUnit: baseUnit || 'Einheit',
-    isEstimated: false,
+    pricePerBaseUnit: typeof offer?.price === 'number' ? offer.price : Infinity,
+    baseUnit: offer?.referenceUnit || 'Stück',
+    isEstimated: true,
   };
 }
 
@@ -100,7 +201,7 @@ export function isOfferCurrentlyValid(offer, referenceDate = new Date()) {
  * Whitelist echter Supermärkte, Discounter, Drogerien und Bio-Supermärkte in Deutschland
  */
 export const SUPERMARKET_WHITELIST = [
-  'aldi', 'lidl', 'rewe', 'edeka', 'kaufland', 'penny', 'netto',
+  'aldi', 'lidl', 'rewe', 'rewe center', 'edeka', 'kaufland', 'penny', 'netto',
   'marktkauf', 'norma', 'tegut', 'globus', 'hit', 'konsum',
   'feneberg', 'famila', 'combi', 'wasgau', 'v-markt', 'bünting',
   'dm', 'rossmann', 'müller', 'budni',
@@ -136,6 +237,51 @@ export function isGenuineSupermarket(retailerName) {
 }
 
 /**
+ * Prüft, ob ein Händlername (und optional dessen Slug) zu einem Händlerfilter passt.
+ * Unterscheidet strikt zwischen ähnlichen Ketten wie "REWE" vs. "REWE Center",
+ * damit REWE-Center-Angebote nicht versehentlich unter REWE auftauchen.
+ */
+export function isMatchingRetailer(offerRetailer, offerSlug = '', filterRetailer = '') {
+  const oName = (offerRetailer || '').toLowerCase().trim();
+  const oSlug = (offerSlug || '').toLowerCase().trim();
+  const f = (filterRetailer || '').toLowerCase().trim();
+
+  if (!f) return false;
+  if (oName === f || oSlug === f) return true;
+
+  // Strikte Unterscheidung: "REWE" vs. "REWE Center"
+  if (f === 'rewe') {
+    // REWE Filter darf NICHT auf REWE Center matchen!
+    return (oName === 'rewe' || oSlug === 'rewe') &&
+           !oName.includes('center') &&
+           !oSlug.includes('center');
+  }
+  if (f === 'rewe center' || f === 'rewe-center') {
+    return (oName.includes('rewe') && oName.includes('center')) ||
+           (oSlug.includes('rewe') && oSlug.includes('center'));
+  }
+
+  // Strikte Unterscheidung: "Edeka" vs. "Edeka Center"
+  if (f === 'edeka') {
+    return (oName === 'edeka' || oSlug === 'edeka') &&
+           !oName.includes('center') &&
+           !oSlug.includes('center');
+  }
+  if (f === 'edeka center' || f === 'edeka-center') {
+    return (oName.includes('edeka') && oName.includes('center')) ||
+           (oSlug.includes('edeka') && oSlug.includes('center'));
+  }
+
+  // Mehrwort-Ketten (z.B. "Aldi Nord", "Netto Marken-Discount")
+  if (f.includes(' ') || f.includes('-')) {
+    return oName.includes(f) || oSlug.includes(f);
+  }
+
+  // Einwort-Ketten mit Wortgrenze
+  return new RegExp(`\\b${f}\\b`, 'i').test(oName) || oSlug === f;
+}
+
+/**
  * Filtert und sortiert eine Liste von normalisierten Angeboten
  */
 export function filterAndSortOffers(offers, options = {}) {
@@ -143,7 +289,7 @@ export function filterAndSortOffers(offers, options = {}) {
 
   const {
     sortBy = 'refPrice', // 'refPrice' | 'price' | 'discount' | 'validTo' | 'title' | 'retailer'
-    retailers = [],       // z. B. ['Lidl', 'Aldi', 'Rewe']
+    retailers = options.retailer ? [options.retailer] : [],       // z. B. ['Lidl', 'Aldi', 'Rewe', 'REWE Center']
     allowedRetailers = [], // wenn gesetzt: nur Angebote von diesen aktiven Supermärkten
     strictSupermarketOnly = true, // wenn true, Non-Supermärkte (Möbelhäuser, Baumärkte) ausschließen
     category = 'all',     // 'all' | 'dairy' | 'produce' | 'meat' | 'drinks' | 'snacks' | 'pantry' | 'nonfood'
@@ -159,7 +305,8 @@ export function filterAndSortOffers(offers, options = {}) {
     minDiscount = null,
   } = options;
 
-  const retailerFilters = (Array.isArray(retailers) ? retailers : [retailers])
+  const rawRetailers = (retailers && retailers.length > 0) ? retailers : (options.retailer ? [options.retailer] : []);
+  const retailerFilters = (Array.isArray(rawRetailers) ? rawRetailers : [rawRetailers])
     .map(r => String(r).toLowerCase().trim())
     .filter(r => Boolean(r) && r !== 'all');
 
@@ -176,21 +323,16 @@ export function filterAndSortOffers(offers, options = {}) {
 
     // Aktive Händlerauswahl (AP 2: Supermärkte aktivieren / deaktivieren)
     if (Array.isArray(allowedRetailers) && allowedRetailers.length > 0) {
-      const allowedClean = allowedRetailers.map(r => String(r).toLowerCase().trim()).filter(Boolean);
-      const offerRet = (offer.retailer || '').toLowerCase();
-      const offerSlug = (offer.retailerSlug || '').toLowerCase();
-      const isAllowed = allowedClean.some(
-        al => offerRet.includes(al) || offerSlug.includes(al) || al.includes(offerRet)
+      const isAllowed = allowedRetailers.some(
+        al => isMatchingRetailer(offer.retailer, offer.retailerSlug, al)
       );
       if (!isAllowed) return false;
     }
 
     // Händlerfilter (explizite Auswahl)
     if (retailerFilters.length > 0) {
-      const offerRetailer = (offer.retailer || '').toLowerCase();
-      const offerSlug = (offer.retailerSlug || '').toLowerCase();
       const matches = retailerFilters.some(
-        filter => offerRetailer.includes(filter) || offerSlug.includes(filter)
+        filter => isMatchingRetailer(offer.retailer, offer.retailerSlug, filter)
       );
       if (!matches) return false;
     }
@@ -441,12 +583,76 @@ export function calculateItemSavings(item, referenceOffers = []) {
 }
 
 /**
- * Berechnet Gesamtkosten, Gesamtersparnis und detaillierte Ersparnis-Aufschlüsselung für einen Warenkorb
+ * Erkennt automatisch deutsches Einweg- und Mehrweg-Pfand für Getränke
+ * (Dosen, PET-Einweg, Bierflaschen, Kästen)
+ */
+export function detectDeposit(item) {
+  if (!item || !item.title) return 0;
+  const text = `${item.title} ${item.description || ''} ${item.packageSize || ''}`.toLowerCase();
+
+  // Nicht-Getränke ausschließen (z. B. Suppendosen, Tierfutter, Malerbedarf)
+  if (/(suppe|ravioli|gulasch|eintopf|bohne|erbse|mais|thunfisch|tomat|tierfutter|hundefutter|katzenfutter|farbdose|lack)/i.test(text)) {
+    return 0;
+  }
+
+  // 1. Getränkekästen / Kisten
+  if (/\b(kasten|kiste)\b/i.test(text)) {
+    if (/\bbügel/i.test(text)) return 4.50;
+    if (/\b(wasser|mineralwasser|sprudel)\b/i.test(text)) return 3.30;
+    return 3.10; // Standard Bierkasten (20x0.5l oder 24x0.33l)
+  }
+
+  // 2. Sixpack / Gebinde
+  const sixMatch = text.match(/\b(?:6\s*[xX*]\s*0,[35]|sixpack|6er\s*träger)\b/i);
+  if (sixMatch) {
+    if (/\b(dose|dosen|can|energy|cola|pepsi)\b/i.test(text)) return 1.50; // 6x 0.25€
+    return 0.48; // 6x 0.08€ Mehrweg-Bier
+  }
+
+  // 3. Joghurt/Milch im Mehrweg-Pfandglas (0,15 €)
+  if (/\b(pfandglas|mehrwegglas)\b/i.test(text) || (/\bjoghurt\b/i.test(text) && /\bglas\b/i.test(text))) {
+    return 0.15;
+  }
+
+  // 4. Einweg-Dosen (0,25 €)
+  if (/\b(dose|dosen|can|energy|red bull|monster|rockstar|booster|dr pepper|coca[- ]cola|cola|pepsi|fanta|sprite|mezzo mix|schweppes)\b/i.test(text)) {
+    return 0.25;
+  }
+
+  // 5. Einweg-PET-Flaschen (0,25 €)
+  if (/\b(pet|einweg|volvic|vio|gerolsteiner.*pet|vittel)\b/i.test(text)) {
+    return 0.25;
+  }
+
+  // 6. Bierflaschen (Mehrweg 0,08 € oder 0,15 €)
+  if (/\b(bier|pils|pilsener|pilsner|weizen|helles|export|radler|kölsch|altbier|brauerei)\b/i.test(text) || /\bbügel/i.test(text)) {
+    if (/\b(bügel|flensburger|mönchshof)/i.test(text)) {
+      return 0.15;
+    }
+    // Einzelflasche Bier
+    if (/\b(0,33|0,5|flasche)\b/i.test(text)) {
+      return 0.08;
+    }
+    return 0.08;
+  }
+
+  // 7. Allgemeine Glasflaschen Mehrweg für Wasser / Saft (0,15 €)
+  if (/\b(mehrweg|brunnen|quelle|mineralwasser|saft)\b/i.test(text) && /\bglas\b/i.test(text)) {
+    return 0.15;
+  }
+
+  return 0;
+}
+
+/**
+ * Berechnet Gesamtkosten, Gesamtersparnis, Pfand und detaillierte Ersparnis-Aufschlüsselung für einen Warenkorb
  */
 export function calculateBasketTotals(basketItems = [], referenceOffers = []) {
   if (!Array.isArray(basketItems) || basketItems.length === 0) {
     return {
       totalPrice: 0,
+      totalDeposit: 0,
+      grandTotalWithDeposit: 0,
       totalSavings: 0,
       directSavings: 0,
       estimatedSavings: 0,
@@ -457,31 +663,41 @@ export function calculateBasketTotals(basketItems = [], referenceOffers = []) {
   }
 
   let totalPrice = 0;
+  let totalDeposit = 0;
   let directSavings = 0;
   let estimatedSavings = 0;
   let totalOriginalPrice = 0;
   const itemsBreakdown = [];
 
   for (const item of basketItems) {
+    const qty = (typeof item.quantity === 'number' && item.quantity > 0) ? item.quantity : 1;
     const price = typeof item.price === 'number' ? item.price : parseFloat(item.price) || 0;
-    totalPrice += price;
+    const itemTotal = price * qty;
+    totalPrice += itemTotal;
+
+    const depositPerUnit = detectDeposit(item);
+    const itemDeposit = depositPerUnit * qty;
+    totalDeposit += itemDeposit;
 
     if (price > 0) {
       const res = calculateItemSavings(item, referenceOffers);
-      if (res.isEstimated) {
-        estimatedSavings += res.savings;
-      } else {
-        directSavings += res.savings;
-      }
-      totalOriginalPrice += (res.originalPrice || price);
+      const itemDirectSavings = res.isEstimated ? 0 : (res.savings * qty);
+      const itemEstSavings = res.isEstimated ? (res.savings * qty) : 0;
+      directSavings += itemDirectSavings;
+      estimatedSavings += itemEstSavings;
+      totalOriginalPrice += ((res.originalPrice || price) * qty);
 
       itemsBreakdown.push({
         id: item.id,
         title: item.title,
         retailer: item.retailer,
         price,
+        quantity: qty,
+        itemTotal: parseFloat(itemTotal.toFixed(2)),
+        depositPerUnit,
+        itemDeposit: parseFloat(itemDeposit.toFixed(2)),
         originalPrice: res.originalPrice,
-        savings: res.savings,
+        savings: parseFloat((res.savings * qty).toFixed(2)),
         isEstimated: res.isEstimated,
         reason: res.reason,
       });
@@ -490,9 +706,12 @@ export function calculateBasketTotals(basketItems = [], referenceOffers = []) {
 
   const totalSavings = parseFloat((directSavings + estimatedSavings).toFixed(2));
   const savingsPercent = totalOriginalPrice > 0 ? Math.round((totalSavings / totalOriginalPrice) * 100) : 0;
+  const grandTotalWithDeposit = parseFloat((totalPrice + totalDeposit).toFixed(2));
 
   return {
     totalPrice: parseFloat(totalPrice.toFixed(2)),
+    totalDeposit: parseFloat(totalDeposit.toFixed(2)),
+    grandTotalWithDeposit,
     totalSavings,
     directSavings: parseFloat(directSavings.toFixed(2)),
     estimatedSavings: parseFloat(estimatedSavings.toFixed(2)),
