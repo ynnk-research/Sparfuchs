@@ -6,10 +6,46 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { validateAndSanitizeOldPrice } from './comparator.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const HISTORY_FILE = path.join(__dirname, '../../.cache/history.json');
+
+export function reconcileReceipt(receipt) {
+  if (!receipt || !Array.isArray(receipt.items) || receipt.items.length === 0) return receipt;
+  let paid = 0;
+  let verifiedSavings = 0;
+  let count = 0;
+  const normalizedItems = [];
+  for (const item of receipt.items.slice(0, 200)) {
+    if (!item || typeof item !== 'object') continue;
+    const price = Number(item.price);
+    if (!Number.isFinite(price) || price < 0 || price > 100000) continue;
+    const quantity = Number.isFinite(Number(item.quantity)) && Number(item.quantity) > 0
+      ? Math.min(1000, Number(item.quantity)) : 1;
+    const oldPrice = item.isEstimatedOldPrice ? null
+      : validateAndSanitizeOldPrice(price, Number(item.oldPrice), item.isNonFood);
+    normalizedItems.push({
+      title: String(item.title || 'Artikel').slice(0, 200),
+      retailer: String(item.retailer || 'Einkaufsnotizen').slice(0, 100),
+      price,
+      quantity,
+      oldPrice,
+      formattedPrice: `${price.toFixed(2).replace('.', ',')} €`,
+      formattedOldPrice: oldPrice ? `${oldPrice.toFixed(2).replace('.', ',')} €` : null,
+      checked: Boolean(item.checked),
+    });
+    paid += price * quantity;
+    verifiedSavings += (oldPrice ? oldPrice - price : 0) * quantity;
+    count += quantity;
+  }
+  paid = Number(paid.toFixed(2));
+  verifiedSavings = Number(verifiedSavings.toFixed(2));
+  return { ...receipt, items: normalizedItems, itemCount: count, totalPaid: paid,
+    totalSavings: verifiedSavings, totalRegular: Number((paid + verifiedSavings).toFixed(2)),
+    savingsPercent: paid + verifiedSavings > 0 ? Math.round(verifiedSavings / (paid + verifiedSavings) * 100) : 0 };
+}
 
 /**
  * Lädt alle bisher verbuchten Einkäufe aus der JSON-Datei
@@ -19,7 +55,7 @@ export function loadHistoryFromFile(filePath = HISTORY_FILE) {
     if (fs.existsSync(filePath)) {
       const data = fs.readFileSync(filePath, 'utf-8');
       const parsed = JSON.parse(data);
-      return Array.isArray(parsed) ? parsed : [];
+      return Array.isArray(parsed) ? parsed.map(reconcileReceipt) : [];
     }
   } catch (err) {
     console.warn('Historie konnte nicht gelesen werden:', err.message);
@@ -113,11 +149,11 @@ export function calculateHouseholdStats(receipts = []) {
         }
         const entry = storeMap.get(storeName);
         const itemPrice = typeof item.price === 'number' ? item.price : parseFloat(item.price) || 0;
+        const quantity = Number.isFinite(item.quantity) && item.quantity > 0 ? item.quantity : 1;
         const itemOld = typeof item.oldPrice === 'number' && item.oldPrice > itemPrice
-          ? item.oldPrice
-          : (itemPrice > 0 ? itemPrice * 1.25 : 0);
-        entry.spent += itemPrice;
-        entry.savings += Math.max(0, itemOld - itemPrice);
+          ? item.oldPrice : itemPrice;
+        entry.spent += itemPrice * quantity;
+        entry.savings += Math.max(0, itemOld - itemPrice) * quantity;
       }
     } else {
       // Gleichmäßig auf beteiligte Stores aufteilen falls keine Einzelartikel hinterlegt

@@ -3,7 +3,7 @@
  * Berechnet die kostengünstigste Einkaufsstrategie für mehrere Artikel.
  */
 
-import { filterAndSortOffers, getStandardizedReferencePrice, isGenuineSupermarket, isMatchingRetailer } from './comparator.js';
+import { filterAndSortOffers, isGenuineSupermarket, isMatchingRetailer } from './comparator.js';
 
 /**
  * Bereinigt einen Einkaufslisten-Eintrag für die Supermarkt-Suche
@@ -126,7 +126,7 @@ export function isOfferRelevantToQuery(query, offer) {
  * Wählt das beste Angebot für eine Suchanfrage bei einem bestimmten Händler aus
  */
 function getBestOfferForStore(offers, storeName, options = {}, query = '') {
-  const { preferReferencePrice = true, excludeAppOnly = false } = options;
+  const { excludeAppOnly = false } = options;
 
   let relevantOffers = offers;
   if (query) {
@@ -136,7 +136,7 @@ function getBestOfferForStore(offers, storeName, options = {}, query = '') {
   const storeOffers = filterAndSortOffers(relevantOffers, {
     retailers: [storeName],
     excludeAppOnly,
-    sortBy: preferReferencePrice ? 'refPrice' : 'price',
+    sortBy: 'price',
     validNowOnly: true,
   });
 
@@ -169,7 +169,7 @@ export function getTopAlternativesForItem(query, allOffers, chosenOffer = null, 
   });
 
   const sorted = filterAndSortOffers(relevant, {
-    sortBy: options.preferReferencePrice ? 'refPrice' : 'price',
+    sortBy: 'price',
     strictSupermarketOnly: true,
     validNowOnly: true,
   });
@@ -307,8 +307,7 @@ export function calculateSmartSplit(itemQueries, itemResultsMap, storeSummaries,
   }
 
   const quantities = options.quantities || {};
-  // Wir testen alle 2er-Kombinationen der Top-Händler (begrenzt auf Top 8 zur Performance-Optimierung)
-  const candidateStores = storeSummaries.slice(0, 8).map(s => s.retailer);
+  const candidateStores = storeSummaries.map(s => s.retailer);
   let bestSplit = null;
 
   for (let i = 0; i < candidateStores.length; i++) {
@@ -340,12 +339,8 @@ export function calculateSmartSplit(itemQueries, itemResultsMap, storeSummaries,
         let chosenOffer = null;
 
         if (offerA && offerB) {
-          const compA = options.preferReferencePrice
-            ? getStandardizedReferencePrice(offerA).pricePerBaseUnit
-            : offerA.price;
-          const compB = options.preferReferencePrice
-            ? getStandardizedReferencePrice(offerB).pricePerBaseUnit
-            : offerB.price;
+          const compA = offerA.price;
+          const compB = offerB.price;
 
           if (compA <= compB) {
             chosenStore = storeA;
@@ -462,9 +457,17 @@ export function optimizeBasket(itemQueries, itemResultsMap, options = {}) {
   }
 
   let splitSavingsVsSingle = 0;
-  if (singleStoreChampion && smartSplit && smartSplit.totalPrice < singleStoreChampion.totalPrice) {
+  const comparablePlans = Boolean(singleStoreChampion && smartSplit &&
+      smartSplit.matchedCount === singleStoreChampion.matchedCount);
+  if (comparablePlans &&
+      smartSplit.totalPrice < singleStoreChampion.totalPrice) {
     splitSavingsVsSingle = parseFloat((singleStoreChampion.totalPrice - smartSplit.totalPrice).toFixed(2));
   }
+  const extraStoreCost = Number.isFinite(options.extraStoreCost) && options.extraStoreCost > 0
+    ? options.extraStoreCost : 0;
+  const splitNetSaving = comparablePlans
+    ? parseFloat((singleStoreChampion.totalPrice - smartSplit.totalPrice - extraStoreCost).toFixed(2))
+    : null;
 
   return {
     itemQueries,
@@ -473,6 +476,9 @@ export function optimizeBasket(itemQueries, itemResultsMap, options = {}) {
     smartSplit,
     bestPerItem,
     splitSavingsVsSingle,
+    splitNetSaving,
+    extraStoreCost,
+    comparablePlans,
     allStores: storeSummaries,
   };
 }

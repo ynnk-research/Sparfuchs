@@ -156,7 +156,7 @@ export function getStandardizedReferencePrice(offer) {
       return {
         pricePerBaseUnit: calcRef,
         baseUnit: pkg.baseUnit,
-        isEstimated: false,
+        isEstimated: true,
         extractedPackage: pkg,
       };
     }
@@ -408,6 +408,9 @@ export function filterAndSortOffers(offers, options = {}) {
   // 2. Preis-Konsistenz: Jedes Angebot mit vollständigen, validierten Preis- und Sparangaben anreichern
   const enriched = filtered.map(offer => {
     const catInfo = classifyOffer(offer);
+    const standardizedRef = getStandardizedReferencePrice(offer);
+    const referencePriceSource = typeof offer.referencePrice === 'number' && offer.referencePrice > 0
+      ? 'retailer' : (standardizedRef.extractedPackage ? 'package' : 'unknown');
     let oldPrice = validateAndSanitizeOldPrice(offer.price, offer.oldPrice, offer.isNonFood);
     let isEstimatedOldPrice = false;
 
@@ -431,13 +434,18 @@ export function filterAndSortOffers(offers, options = {}) {
     let savingsFormatted = null;
 
     if (oldPrice && oldPrice > offer.price) {
-      savings = parseFloat((oldPrice - offer.price).toFixed(2));
       formattedOldPrice = `${oldPrice.toFixed(2).replace('.', ',')} €`;
-      savingsFormatted = `${savings.toFixed(2).replace('.', ',')} €`;
-      if (!discountPercent) {
-        discountPercent = Math.round(((oldPrice - offer.price) / oldPrice) * 100);
+      if (!isEstimatedOldPrice) {
+        savings = parseFloat((oldPrice - offer.price).toFixed(2));
+        savingsFormatted = `${savings.toFixed(2).replace('.', ',')} €`;
+        if (!discountPercent) {
+          discountPercent = Math.round(((oldPrice - offer.price) / oldPrice) * 100);
+        }
       }
+    } else {
+      discountPercent = null;
     }
+    if (isEstimatedOldPrice) discountPercent = null;
 
     return {
       ...offer,
@@ -450,6 +458,11 @@ export function filterAndSortOffers(offers, options = {}) {
       categoryId: catInfo.categoryId,
       categoryLabel: catInfo.categoryLabel,
       categoryIcon: catInfo.categoryIcon,
+      referencePrice: referencePriceSource === 'unknown' ? null : standardizedRef.pricePerBaseUnit,
+      referenceUnit: standardizedRef.baseUnit,
+      formattedRefPrice: referencePriceSource === 'unknown' ? null
+        : `${standardizedRef.pricePerBaseUnit.toFixed(2).replace('.', ',')} €/${standardizedRef.baseUnit}`,
+      referencePriceSource,
     };
   });
 
@@ -468,6 +481,9 @@ export function filterAndSortOffers(offers, options = {}) {
         // Primär nach standardisiertem Grundpreis sortieren
         const stdA = getStandardizedReferencePrice(a);
         const stdB = getStandardizedReferencePrice(b);
+        if (stdA.baseUnit !== stdB.baseUnit) {
+          return stdA.baseUnit.localeCompare(stdB.baseUnit, 'de');
+        }
         if (stdA.pricePerBaseUnit !== stdB.pricePerBaseUnit) {
           return stdA.pricePerBaseUnit - stdB.pricePerBaseUnit;
         }
@@ -519,7 +535,8 @@ export function calculateItemSavings(item, referenceOffers = []) {
   }
 
   // 1. Echter Streichpreis / UVP vorhanden (und plausibel!)
-  const sanitizedDirect = validateAndSanitizeOldPrice(item.price, item.oldPrice, item.isNonFood);
+  const sanitizedDirect = item.isEstimatedOldPrice ? null
+    : validateAndSanitizeOldPrice(item.price, item.oldPrice, item.isNonFood);
   if (sanitizedDirect && sanitizedDirect > item.price) {
     const savings = parseFloat((sanitizedDirect - item.price).toFixed(2));
     return {
@@ -589,15 +606,11 @@ export function calculateItemSavings(item, referenceOffers = []) {
     }
   }
 
-  // 4. Konservative Marktschätzung für Aktionspreise (~20-25% unter Normalpreis)
-  const estimatedOriginal = parseFloat((item.price * 1.25).toFixed(2));
-  const estimatedSavings = parseFloat((estimatedOriginal - item.price).toFixed(2));
-
   return {
-    savings: estimatedSavings,
-    originalPrice: estimatedOriginal,
-    isEstimated: true,
-    reason: 'Geschätzter Normalpreis (~20% Ersparnis)',
+    savings: 0,
+    originalPrice: item.price,
+    isEstimated: false,
+    reason: 'Kein verlässlicher Vergleichspreis',
   };
 }
 
@@ -704,7 +717,7 @@ export function calculateBasketTotals(basketItems = [], referenceOffers = []) {
       const itemEstSavings = res.isEstimated ? (res.savings * qty) : 0;
       directSavings += itemDirectSavings;
       estimatedSavings += itemEstSavings;
-      totalOriginalPrice += ((res.originalPrice || price) * qty);
+      totalOriginalPrice += (price + (res.isEstimated ? 0 : res.savings)) * qty;
 
       itemsBreakdown.push({
         id: item.id,
@@ -716,14 +729,15 @@ export function calculateBasketTotals(basketItems = [], referenceOffers = []) {
         depositPerUnit,
         itemDeposit: parseFloat(itemDeposit.toFixed(2)),
         originalPrice: res.originalPrice,
-        savings: parseFloat((res.savings * qty).toFixed(2)),
+        savings: parseFloat(((res.isEstimated ? 0 : res.savings) * qty).toFixed(2)),
+        comparisonDifference: res.isEstimated ? parseFloat((res.savings * qty).toFixed(2)) : 0,
         isEstimated: res.isEstimated,
         reason: res.reason,
       });
     }
   }
 
-  const totalSavings = parseFloat((directSavings + estimatedSavings).toFixed(2));
+  const totalSavings = parseFloat(directSavings.toFixed(2));
   const savingsPercent = totalOriginalPrice > 0 ? Math.round((totalSavings / totalOriginalPrice) * 100) : 0;
   const grandTotalWithDeposit = parseFloat((totalPrice + totalDeposit).toFixed(2));
 

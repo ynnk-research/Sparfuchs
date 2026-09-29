@@ -4,6 +4,11 @@
  * und bereinigt Zutatenangaben für die Supermarkt-Angebotssuche.
  */
 
+import dns from 'node:dns/promises';
+import net from 'node:net';
+import http from 'node:http';
+import https from 'node:https';
+
 const UNIT_PATTERNS = [
   'esslöffel', 'el',
   'teelöffel', 'tl',
@@ -261,22 +266,10 @@ export function extractRecipeFromHtml(html) {
 /**
  * Liest Rezept-Zutaten entweder aus einer URL oder aus eingegebenem Freitext
  */
-export async function parseRecipeInput({ url, text, fetchFn = fetch }) {
+export async function parseRecipeInput({ url, text, fetchFn = pinnedRecipeFetch }) {
   if (url && typeof url === 'string' && url.trim().startsWith('http')) {
     const cleanUrl = url.trim();
-    const response = await fetchFn(cleanUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Konnte Rezept von URL nicht laden: HTTP ${response.status}`);
-    }
-
-    const html = await response.text();
+    const html = await fetchRecipeHtml(cleanUrl, fetchFn);
     const recipe = extractRecipeFromHtml(html);
 
     if (recipe && recipe.ingredients.length > 0) {
@@ -308,4 +301,129 @@ export async function parseRecipeInput({ url, text, fetchFn = fetch }) {
   }
 
   throw new Error('Weder gültige URL noch Zutaten-Text angegeben');
+}
+function isPublicAddress(address) {
+  if (net.isIP(address) === 4) {
+    const [a, b] = address.split('.').map(Number);
+    return !(
+      a === 0 || a === 10 || a === 127 || a >= 224 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 192 && b === 0) ||
+      (a === 198 && (b === 18 || b === 19))
+    );
+  }
+  if (net.isIP(address) === 6) {
+    const low = address.toLowerCase();
+    if (low.startsWith('::ffff:')) return isPublicAddress(low.slice(7));
+    return !(low === '::1' || low === '::' || low.startsWith('fc') || low.startsWith('fd') ||
+      low.startsWith('fe8') || low.startsWith('fe9') || low.startsWith('fea') || low.startsWith('feb'));
+  }
+  return false;
+}
+
+async function assertPublicRecipeUrl(value) {
+  const url = new URL(value);
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.port) {
+    throw new Error('Nur öffentliche HTTP(S)-Rezeptseiten sind erlaubt');
+  }
+  if (net.isIP(url.hostname) || url.hostname === 'localhost' || url.hostname.endsWith('.local')) {
+    throw new Error('Lokale Rezept-Adressen sind nicht erlaubt');
+  }
+  const addresses = await dns.lookup(url.hostname, { all: true });
+  if (!addresses.length || addresses.some(({ address }) => !isPublicAddress(address))) {
+    throw new Error('Rezept-Adresse ist nicht öffentlich erreichbar');
+  }
+  return url;
+}
+
+async function pinnedRecipeFetch(value, options = {}) {
+  const url = await assertPublicRecipeUrl(value);
+  const addresses = await dns.lookup(url.hostname, { all: true });
+  if (!addresses.length || addresses.some(({ address }) => !isPublicAddress(address))) {
+    throw new Error('Rezept-Adresse ist nicht öffentlich erreichbar');
+  }
+  const chosen = addresses[0];
+  const transport = url.protocol === 'https:' ? https : http;
+  return new Promise((resolve, reject) => {
+    const request = transport.request(url, {
+      headers: options.headers,
+      timeout: 8000,
+      lookup: (_hostname, _lookupOptions, callback) => callback(null, chosen.address, chosen.family),
+    }, async response => {
+      try {
+        const chunks = [];
+        let length = 0;
+        for await (const chunk of response) {
+          length += chunk.length;
+          if (length > 1_000_000) {
+            request.destroy();
+            throw new Error('Rezeptseite ist zu groß');
+          }
+          chunks.push(chunk);
+        }
+        const body = Buffer.concat(chunks).toString('utf8');
+        resolve({
+          status: response.statusCode,
+          ok: response.statusCode >= 200 && response.statusCode < 300,
+          headers: { get: name => response.headers[name.toLowerCase()] || null },
+          text: async () => body,
+        });
+      } catch (error) { reject(error); }
+    });
+    request.on('timeout', () => request.destroy(new Error('Rezeptseite antwortet nicht')));
+    request.on('error', reject);
+    request.end();
+  });
+}
+
+async function fetchRecipeHtml(url, fetchFn) {
+  let currentUrl = url;
+  for (let redirect = 0; redirect < 4; redirect++) {
+    await assertPublicRecipeUrl(currentUrl);
+    const response = await fetchFn(currentUrl, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(8000),
+      headers: {
+        'User-Agent': 'SparFuchs/1.0 recipe-import',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+    });
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get('location');
+      if (!location) throw new Error('Rezept-Weiterleitung ohne Ziel');
+      currentUrl = new URL(location, currentUrl).href;
+      continue;
+    }
+    if (!response.ok) throw new Error(`Konnte Rezept nicht laden: HTTP ${response.status}`);
+    const contentType = response.headers?.get?.('content-type') || '';
+    if (contentType && !/text\/html|application\/xhtml\+xml/i.test(contentType)) {
+      throw new Error('Die Rezeptseite liefert kein HTML');
+    }
+    if (Number(response.headers?.get?.('content-length') || 0) > 1_000_000) {
+      throw new Error('Rezeptseite ist zu groß');
+    }
+    if (!response.body?.getReader) {
+      const html = await response.text();
+      if (html.length > 1_000_000) throw new Error('Rezeptseite ist zu groß');
+      return html;
+    }
+    const reader = response.body.getReader();
+    const chunks = [];
+    let length = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > 1_000_000) {
+        await reader.cancel();
+        throw new Error('Rezeptseite ist zu groß');
+      }
+      chunks.push(value);
+    }
+    return new TextDecoder().decode(Buffer.concat(chunks));
+  }
+  throw new Error('Zu viele Rezept-Weiterleitungen');
 }
