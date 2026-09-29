@@ -13,7 +13,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=2.2">
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="style.css?v=2.5">
 </head>
 <body class="dark-theme">
   <!-- Top Navigation -->
@@ -266,6 +267,7 @@
           <div class="active-tag-pills" id="activeTagPills"></div>
         </div>
         <div id="resultsCount" class="results-count"></div>
+        <div id="resultsSources" class="results-sources" aria-live="polite"></div>
       </div>
 
       <!-- Loading Spinner -->
@@ -341,6 +343,13 @@
         >
         <button type="submit" class="btn-add-item">Notieren</button>
       </form>
+      <div class="basket-template-controls">
+        <input id="templateNameInput" type="text" maxlength="40" placeholder="Name für wiederkehrende Liste" aria-label="Name der Vorlage">
+        <button type="button" id="saveBasketTemplateBtn">Als Vorlage speichern</button>
+        <select id="basketTemplateSelect" aria-label="Gespeicherte Vorlage"></select>
+        <button type="button" id="loadBasketTemplateBtn">Vorlage laden</button>
+        <button type="button" id="deleteBasketTemplateBtn" title="Vorlage löschen">🗑️</button>
+      </div>
 
       <!-- Quick Action Toolbar: Markt-Modus, Teilen, QR-Code, Drucken & Leeren -->
       <div class="basket-toolbar-row">
@@ -458,6 +467,9 @@
         <div class="optimize-info">
           <span>Smarte Analyse für PLZ <strong id="basketPlzDisplay">10115</strong></span>
         </div>
+        <label class="trip-cost-control">Kosten für einen zusätzlichen Markt (€)
+          <input id="extraStoreCostInput" type="number" min="0" step="0.50" value="0" aria-label="Zusätzliche Fahrt- und Zeitkosten pro weiterem Markt">
+        </label>
         <div class="optimize-buttons-row">
           <button id="optimizeBasketBtn" class="btn-optimize">
             <span class="icon-sparkle">⚡</span>
@@ -605,6 +617,9 @@
           </h4>
           <div class="history-actions-row">
             <button id="exportCsvBtn" class="btn-secondary btn-sm" title="Einkaufshistorie als CSV für Excel & Finanz-Tools herunterladen">📥 CSV Export</button>
+            <button id="exportHistoryJsonBtn" class="btn-secondary btn-sm" title="Private Belege als JSON sichern">Backup</button>
+            <button id="importHistoryJsonBtn" class="btn-secondary btn-sm" title="Gesicherte Belege wiederherstellen">Backup laden</button>
+            <input id="importHistoryFileInput" type="file" accept="application/json,.json" hidden>
             <button id="clearHistoryBtn" class="btn-text-danger" title="Gesamte Historie zurücksetzen">Historie leeren</button>
           </div>
         </div>
@@ -671,14 +686,7 @@
           </a>
         </div>
 
-        <!-- Lokaler Host-Hinweis (Dev / Localhost) -->
-        <div id="qrHostSelectorBox" class="qr-host-box" style="display: none;">
-          <span class="qr-host-label">🌐 Ziel-Domain für Smartphone:</span>
-          <div class="qr-host-inputs">
-            <input type="text" id="qrTargetHostInput" placeholder="https://sparfuchs-heo8.onrender.com" />
-            <button type="button" id="updateQrHostBtn">Aktualisieren</button>
-          </div>
-        </div>
+        <p class="qr-intro-text">PC und Handy müssen diesen SparFuchs-Server erreichen können.</p>
       </div>
     </div>
   </div>
@@ -728,15 +736,28 @@
         <button type="button" id="closeStoresModalBtn" class="btn-modal-close" title="Schließen">✕</button>
       </div>
       <div class="stores-modal-body">
-        <p class="modal-intro-text">
-          Wähle die Geschäfte aus, die für deinen Einkauf in Frage kommen. Angebote anderer Märkte werden ausgeblendet und im Optimierer ignoriert.
-        </p>
-        <div class="stores-bulk-actions">
-          <button type="button" id="selectAllStoresBtn" class="btn-stores-quick">Alle aktivieren</button>
-          <button type="button" id="selectDiscStoresBtn" class="btn-stores-quick">Nur Discounter</button>
-        </div>
-        <div id="storesCheckboxList" class="stores-checkbox-grid">
-          <!-- Rendered via JavaScript -->
+        <p class="modal-intro-text">Wähle für jede gewünschte Supermarktkette genau eine echte Filiale auf der Karte. Deine Auswahl wird gespeichert und bestimmt, welche Kettenangebote du siehst.</p>
+        <div id="selectedMarketsList" class="selected-markets-list" aria-label="Gewählte Filialen"></div>
+        <div class="nearby-markets-box">
+          <h4>📍 Filiale auf der Karte auswählen</h4>
+          <p>Wähle eine Kette, suche bei deiner PLZ und klicke eine Filiale auf der Karte oder in der Ergebnisliste an.</p>
+          <div class="nearby-controls">
+            <select id="marketChainSelect" aria-label="Supermarktkette"></select>
+            <input id="marketSearchZipInput" inputmode="numeric" maxlength="5" aria-label="Postleitzahl für Filialsuche" placeholder="PLZ">
+            <select id="marketRadiusSelect" aria-label="Suchradius">
+              <option value="3">3 km</option>
+              <option value="5" selected>5 km</option>
+              <option value="10">10 km</option>
+              <option value="15">15 km</option>
+              <option value="30">30 km</option>
+            </select>
+            <button type="button" id="findNearbyMarketsBtn" class="btn-stores-quick">Bei PLZ suchen</button>
+          </div>
+          <div id="marketMap" class="market-map" role="application" aria-label="Karte mit Supermarktfilialen"></div>
+          <button type="button" id="searchMapAreaBtn" class="btn-stores-quick">In diesem Kartenausschnitt suchen</button>
+          <p id="nearbyMarketsStatus" role="status"></p>
+          <div id="nearbyMarketsList" class="nearby-markets-list"></div>
+          <small>Filialdaten: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap-Mitwirkende</a>. Angebote gelten für die Kette; die Verfügbarkeit in der gewählten Filiale kann abweichen.</small>
         </div>
         <button type="button" id="saveStoresBtn" class="btn-stores-save">
           <span>Auswahl speichern</span>
@@ -798,6 +819,16 @@
   <!-- Notification Toast -->
   <div id="toast" class="toast"></div>
 
-  <script src="app.js?v=2.3"></script>
+  <dialog id="checkoutReviewDialog" class="checkout-review-dialog" aria-labelledby="checkoutReviewTitle">
+    <h3 id="checkoutReviewTitle">Einkauf prüfen</h3>
+    <p>Trage die tatsächlich bezahlten Preise ein. Entferne Artikel, die nicht verfügbar waren.</p>
+    <div id="checkoutReviewItems" class="checkout-review-items"></div>
+    <div class="checkout-review-actions">
+      <button type="button" id="cancelCheckoutReviewBtn">Abbrechen</button>
+      <button type="button" id="confirmCheckoutReviewBtn">Beleg speichern</button>
+    </div>
+  </dialog>
+  <script src="/vendor/leaflet/leaflet.js"></script>
+  <script src="app.js?v=2.5"></script>
 </body>
 </html>

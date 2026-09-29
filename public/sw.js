@@ -4,12 +4,14 @@
  * im Funkloch des Supermarkts (Kühlregal, Keller, Stahlbetonbau) blitzschnell funktionieren.
  */
 
-const CACHE_NAME = 'sparfuchs-v1.0';
+const CACHE_NAME = 'sparfuchs-v2.5';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
   '/style.css',
   '/app.js',
+  '/vendor/leaflet/leaflet.css',
+  '/vendor/leaflet/leaflet.js',
   '/favicon.svg',
   '/manifest.json',
 ];
@@ -44,6 +46,12 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
+
+  // Navigation must see newly deployed HTML immediately when online.
+  if (request.mode === 'navigate') {
+    event.respondWith(fetch(request).catch(() => caches.match('/index.html')));
+    return;
+  }
 
   // API-Anfragen: Network-First (mit sauberer Fehlerbehandlung im Offline-Fall)
   if (url.pathname.startsWith('/api/')) {

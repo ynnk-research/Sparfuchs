@@ -3,6 +3,74 @@
  * Verwaltet Suche, Filterung, Bio/Non-Food Tags, Favoriten und nach Supermarkt gruppierten Einkaufszettel.
  */
 
+// Anonymous browser identity for private receipt storage. It is not a login.
+function getHistoryDeviceToken() {
+  let token = localStorage.getItem('sparfuchs_device_token');
+  if (!token || !/^[a-f0-9-]{32,64}$/i.test(token)) {
+    token = crypto.randomUUID();
+    localStorage.setItem('sparfuchs_device_token', token);
+  }
+  return token;
+}
+const historyHeaders = () => ({ 'X-Sparfuchs-Device': getHistoryDeviceToken() });
+
+// Sanitize every dynamic HTML fragment before adding it to the page. This also
+// covers retailer data, saved lists, imported QR baskets and recipe metadata.
+function sanitizeHtml(input, ...values) {
+  const html = Array.isArray(input) && Object.prototype.hasOwnProperty.call(input, 'raw')
+    ? input.reduce((out, part, index) => out + part + (index < values.length ? String(values[index] ?? '') : ''), '')
+    : String(input ?? '');
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  const blocked = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'BASE', 'META', 'LINK', 'FORM', 'SVG', 'MATH', 'TEMPLATE']);
+  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_ELEMENT);
+  const elementsToRemove = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (blocked.has(node.tagName)) {
+      elementsToRemove.push(node);
+      continue;
+    }
+    for (const attr of [...node.attributes]) {
+      const name = attr.name.toLowerCase();
+      const value = attr.value.trim();
+      if (name.startsWith('on') || ['srcdoc', 'srcset', 'formaction', 'action', 'xlink:href', 'xmlns', 'is'].includes(name)) {
+        node.removeAttribute(attr.name);
+      } else if (name === 'style' && /url\s*\(|expression\s*\(|@import/i.test(value)) {
+        node.removeAttribute(attr.name);
+      } else if (['href', 'src'].includes(name) && !/^(https?:|data:image\/(?:png|jpeg|webp|gif);base64,|\/|#)/i.test(value)) {
+        node.removeAttribute(attr.name);
+      }
+    }
+  }
+  for (const node of elementsToRemove) node.remove();
+  return template.innerHTML;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[char]);
+}
+
+function safeView(record) {
+  const copy = { ...record };
+  for (const key of ['id', 'title', 'brand', 'retailer', 'description', 'packageSize', 'formattedPrice',
+    'formattedOldPrice', 'formattedRefPrice', 'categoryLabel', 'categoryIcon', 'imageUrl']) {
+    if (typeof copy[key] === 'string') copy[key] = escapeHtml(copy[key]);
+  }
+  return copy;
+}
+
+function readStoredJson(key, fallback) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+    return Array.isArray(fallback) ? (Array.isArray(parsed) ? parsed : fallback) : (parsed ?? fallback);
+  } catch {
+    return fallback;
+  }
+}
+
 // Global State
 const state = {
   query: '',
@@ -19,23 +87,26 @@ const state = {
   category: 'all',
   availableCategories: [],
   // Basket stores items with retailer, price & quantity: [{ id, title, retailer, price, formattedPrice, quantity, checked }]
-  basket: (JSON.parse(localStorage.getItem('sparfuchs_basket_v2') || '[]')).map(item => ({
+  basket: readStoredJson('sparfuchs_basket_v2', []).filter(item => item && typeof item === 'object').map(item => ({
     ...item,
     quantity: (typeof item.quantity === 'number' && item.quantity > 0) ? item.quantity : 1,
   })),
   // Favorites store array of strings / keywords
-  favorites: JSON.parse(localStorage.getItem('sparfuchs_favorites') || '[]'),
+  favorites: readStoredJson('sparfuchs_favorites', []).filter(v => typeof v === 'string'),
   radarDismissed: false,
   // Shopping list history & household stats
-  history: JSON.parse(localStorage.getItem('sparfuchs_history') || '[]'),
+  history: readStoredJson('sparfuchs_history', []).filter(v => v && typeof v === 'object'),
   householdStats: null,
   offers: [],
+  offerSources: [],
   isLoading: false,
   activeShareUrl: '',
   incomingSharedBasket: null,
   // Update v2.0 State
   minDiscount: 0,
-  activeStores: JSON.parse(localStorage.getItem('sparfuchs_active_stores') || '[]'),
+  activeStores: readStoredJson('sparfuchs_active_stores', []),
+  selectedMarkets: readStoredJson('sparfuchs_selected_markets', []).filter(m => m && typeof m === 'object' && typeof m.chain === 'string'),
+  nearbyMarkets: [],
   tableSort: { key: 'refPrice', dir: 'asc' },
   dealSwapTargetItem: null,
   recipeIngredients: [],
@@ -44,7 +115,9 @@ const state = {
   wakeLock: null,
   aisleSort: false,
   budget: parseFloat(localStorage.getItem('sparfuchs_budget') || '0'),
-  searchHistory: JSON.parse(localStorage.getItem('sparfuchs_search_history') || '[]'),
+  searchHistory: readStoredJson('sparfuchs_search_history', []).filter(v => typeof v === 'string'),
+  basketTemplates: readStoredJson('sparfuchs_basket_templates', []).filter(t => t && typeof t === 'object' && Array.isArray(t.items)),
+  extraStoreCost: Number(localStorage.getItem('sparfuchs_extra_store_cost') || 0),
 };
 
 /**
@@ -65,6 +138,11 @@ function validateAndSanitizeClientPrice(price, oldPrice, isNonFood = false) {
   return parseFloat(oldPrice.toFixed(2));
 }
 
+function getVerifiedOldPrice(item) {
+  if (!item || item.isEstimatedOldPrice) return null;
+  return validateAndSanitizeClientPrice(item.price, item.oldPrice, item.isNonFood);
+}
+
 // DOM Elements
 const elements = {
   plzInput: document.getElementById('plzInput'),
@@ -77,6 +155,10 @@ const elements = {
   historyDrawer: document.getElementById('historyDrawer'),
   historyCountBadge: document.getElementById('historyCountBadge'),
   bookBasketBtn: document.getElementById('bookBasketBtn'),
+  checkoutReviewDialog: document.getElementById('checkoutReviewDialog'),
+  checkoutReviewItems: document.getElementById('checkoutReviewItems'),
+  cancelCheckoutReviewBtn: document.getElementById('cancelCheckoutReviewBtn'),
+  confirmCheckoutReviewBtn: document.getElementById('confirmCheckoutReviewBtn'),
   clearHistoryBtn: document.getElementById('clearHistoryBtn'),
   kpiTotalSavings: document.getElementById('kpiTotalSavings'),
   kpiSavingsPct: document.getElementById('kpiSavingsPct'),
@@ -99,6 +181,11 @@ const elements = {
   basketCountBadge: document.getElementById('basketCountBadge'),
   basketItemInput: document.getElementById('basketItemInput'),
   basketAddForm: document.getElementById('basketAddForm'),
+  templateNameInput: document.getElementById('templateNameInput'),
+  basketTemplateSelect: document.getElementById('basketTemplateSelect'),
+  saveBasketTemplateBtn: document.getElementById('saveBasketTemplateBtn'),
+  loadBasketTemplateBtn: document.getElementById('loadBasketTemplateBtn'),
+  deleteBasketTemplateBtn: document.getElementById('deleteBasketTemplateBtn'),
   basketGroupedContainer: document.getElementById('basketGroupedContainer'),
   basketTotalBar: document.getElementById('basketTotalBar'),
   basketGrandTotal: document.getElementById('basketGrandTotal'),
@@ -107,6 +194,7 @@ const elements = {
   basketSavingsPercentBadge: document.getElementById('basketSavingsPercentBadge'),
   basketSavingsNote: document.getElementById('basketSavingsNote'),
   optimizeBasketBtn: document.getElementById('optimizeBasketBtn'),
+  extraStoreCostInput: document.getElementById('extraStoreCostInput'),
   optimizationResultContainer: document.getElementById('optimizationResultContainer'),
   searchForm: document.getElementById('searchForm'),
   searchInput: document.getElementById('searchInput'),
@@ -125,6 +213,7 @@ const elements = {
   viewTableBtn: document.getElementById('viewTableBtn'),
   resultsTitle: document.getElementById('resultsTitle'),
   resultsCount: document.getElementById('resultsCount'),
+  resultsSources: document.getElementById('resultsSources'),
   activeTagPills: document.getElementById('activeTagPills'),
   loadingSpinner: document.getElementById('loadingSpinner'),
   emptyState: document.getElementById('emptyState'),
@@ -158,9 +247,6 @@ const elements = {
   copyShareLinkBtn: document.getElementById('copyShareLinkBtn'),
   copyShareLinkText: document.getElementById('copyShareLinkText'),
   openMobileLinkBtn: document.getElementById('openMobileLinkBtn'),
-  qrHostSelectorBox: document.getElementById('qrHostSelectorBox'),
-  qrTargetHostInput: document.getElementById('qrTargetHostInput'),
-  updateQrHostBtn: document.getElementById('updateQrHostBtn'),
   importBasketModal: document.getElementById('importBasketModal'),
   closeImportModalBtn: document.getElementById('closeImportModalBtn'),
   importModalSummary: document.getElementById('importModalSummary'),
@@ -172,9 +258,15 @@ const elements = {
   storesCountBadge: document.getElementById('storesCountBadge'),
   storesModal: document.getElementById('storesModal'),
   closeStoresModalBtn: document.getElementById('closeStoresModalBtn'),
-  storesCheckboxList: document.getElementById('storesCheckboxList'),
-  selectAllStoresBtn: document.getElementById('selectAllStoresBtn'),
-  selectDiscStoresBtn: document.getElementById('selectDiscStoresBtn'),
+  selectedMarketsList: document.getElementById('selectedMarketsList'),
+  marketChainSelect: document.getElementById('marketChainSelect'),
+  marketSearchZipInput: document.getElementById('marketSearchZipInput'),
+  marketMap: document.getElementById('marketMap'),
+  searchMapAreaBtn: document.getElementById('searchMapAreaBtn'),
+  marketRadiusSelect: document.getElementById('marketRadiusSelect'),
+  findNearbyMarketsBtn: document.getElementById('findNearbyMarketsBtn'),
+  nearbyMarketsStatus: document.getElementById('nearbyMarketsStatus'),
+  nearbyMarketsList: document.getElementById('nearbyMarketsList'),
   saveStoresBtn: document.getElementById('saveStoresBtn'),
   openFavHubBtn: document.getElementById('openFavHubBtn'),
   favHubModal: document.getElementById('favHubModal'),
@@ -221,6 +313,9 @@ const elements = {
   searchHistoryChips: document.getElementById('searchHistoryChips'),
   clearSearchHistoryBtn: document.getElementById('clearSearchHistoryBtn'),
   exportCsvBtn: document.getElementById('exportCsvBtn'),
+  exportHistoryJsonBtn: document.getElementById('exportHistoryJsonBtn'),
+  importHistoryJsonBtn: document.getElementById('importHistoryJsonBtn'),
+  importHistoryFileInput: document.getElementById('importHistoryFileInput'),
 };
 
 /**
@@ -464,9 +559,9 @@ function renderSearchHistoryChips() {
     return;
   }
   elements.searchHistoryRow.style.display = 'flex';
-  elements.searchHistoryChips.innerHTML = state.searchHistory.map(term => {
-    return `<button type="button" class="history-chip" data-query="${term.replace(/"/g, '&quot;')}">${term}</button>`;
-  }).join('');
+  elements.searchHistoryChips.innerHTML = sanitizeHtml(state.searchHistory.map(term => {
+    return `<button type="button" class="history-chip" data-query="${escapeHtml(term)}">${escapeHtml(term)}</button>`;
+  }).join(''));
 
   elements.searchHistoryChips.querySelectorAll('.history-chip').forEach(chip => {
     chip.addEventListener('click', () => {
@@ -511,14 +606,15 @@ function exportHistoryAsCsv() {
         const qty = it.quantity || 1;
         const price = (typeof it.price === 'number') ? it.price.toFixed(2).replace('.', ',') : '0,00';
         const lineTotal = (typeof it.price === 'number') ? (it.price * qty).toFixed(2).replace('.', ',') : '0,00';
-        const lineSavings = (typeof it.savings === 'number') ? it.savings.toFixed(2).replace('.', ',') : '0,00';
+        const lineSavings = (typeof it.oldPrice === 'number' && it.oldPrice > it.price)
+          ? ((it.oldPrice - it.price) * qty).toFixed(2).replace('.', ',') : '0,00';
 
-        rows.push([dateStr, timeStr, store, title, qty, price, lineTotal, lineSavings].join(';'));
+        rows.push([dateStr, timeStr, store, title, qty, price, lineTotal, lineSavings].map(safeCsvCell).join(';'));
       });
     } else {
       const paid = (receipt.totalPaid || 0).toFixed(2).replace('.', ',');
       const sav = (receipt.totalSavings || 0).toFixed(2).replace('.', ',');
-      rows.push([dateStr, timeStr, storeStr, 'Gesamter Einkauf', receipt.itemCount || 1, paid, paid, sav].join(';'));
+      rows.push([dateStr, timeStr, storeStr, 'Gesamter Einkauf', receipt.itemCount || 1, paid, paid, sav].map(safeCsvCell).join(';'));
     }
   });
 
@@ -533,6 +629,52 @@ function exportHistoryAsCsv() {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('📥 Einkaufshistorie erfolgreich als CSV heruntergeladen!');
+}
+
+function safeCsvCell(value) {
+  let text = String(value ?? '');
+  if (/^[\s]*[=+@-]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function exportHistoryJson() {
+  const blob = new Blob([JSON.stringify({ version: 1, history: state.history }, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `SparFuchs-Backup-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+async function importHistoryJson(file) {
+  if (!file || file.size > 2_000_000) {
+    showToast('Backup-Datei fehlt oder ist zu groß.');
+    return;
+  }
+  try {
+    const parsed = JSON.parse(await file.text());
+    if (parsed.version !== 1 || !Array.isArray(parsed.history) || parsed.history.length > 2000) {
+      throw new Error('Ungültiges Backup');
+    }
+    const receipts = parsed.history.filter(r => r && typeof r.id === 'string' && typeof r.date === 'string' && Array.isArray(r.items));
+    const merged = new Map([...state.history, ...receipts].map(r => [r.id, r]));
+    const response = await fetch('/api/history/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...historyHeaders() },
+      body: JSON.stringify({ clientHistory: [...merged.values()] }),
+    });
+    if (!response.ok) throw new Error('Synchronisierung fehlgeschlagen');
+    const data = await response.json();
+    state.history = data.history;
+    state.householdStats = data.stats;
+    localStorage.setItem('sparfuchs_history', JSON.stringify(state.history));
+    renderHistoryUI(state.householdStats, state.history);
+    updateHistoryBadge();
+    showToast(`${receipts.length} Belege aus Backup gelesen.`);
+  } catch (error) {
+    showToast(`Backup konnte nicht geladen werden: ${error.message}`);
+  }
 }
 
 
@@ -597,7 +739,7 @@ function updateActiveTagPills() {
   if (state.onlyNonFood) pills.push('<span class="tag-pill nonfood">📦 Nicht-Lebensmittel</span>');
   if (state.onlyFavorites) pills.push('<span class="tag-pill fav">⭐ Favoriten</span>');
 
-  container.innerHTML = pills.join('');
+  container.innerHTML = sanitizeHtml(pills.join(''));
 
   const removeCatBtn = document.getElementById('removeCategoryFilterBtn');
   if (removeCatBtn) {
@@ -616,7 +758,12 @@ function updateActiveTagPills() {
 /**
  * Holt Angebote vom Backend Server (unterstützt auch leere Suche für "Alle Angebote")
  */
+let offersRequestId = 0;
+let offersAbortController = null;
 async function fetchOffers() {
+  const requestId = ++offersRequestId;
+  offersAbortController?.abort();
+  offersAbortController = new AbortController();
   state.isLoading = true;
   elements.loadingSpinner.style.display = 'block';
   elements.emptyState.style.display = 'none';
@@ -651,11 +798,13 @@ async function fetchOffers() {
       params.append('activeRetailers', state.activeStores.join(','));
     }
 
-    const response = await fetch(`/api/offers?${params.toString()}`);
+    const response = await fetch(`/api/offers?${params.toString()}`, { signal: offersAbortController.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const data = await response.json();
+    if (requestId !== offersRequestId) return;
     state.offers = data.offers || [];
+    state.offerSources = Array.isArray(data.sources) ? data.sources : [];
 
     const catObj = (state.availableCategories || []).find(c => c.id === state.category);
     const catLabel = catObj && catObj.id !== 'all' ? `${catObj.icon} ${catObj.title}` : null;
@@ -681,15 +830,28 @@ async function fetchOffers() {
     if (state.onlyBio && !state.query) titleText = `🌱 Alle aktuellen Bio-Angebote`;
 
     elements.resultsTitle.textContent = titleText;
-    elements.resultsCount.textContent = `${data.filteredCount} Treffer in PLZ ${state.zip}`;
+    elements.resultsCount.textContent = `${data.filteredCount} Treffer für PLZ ${state.zip}`;
+    if (elements.resultsSources) {
+      const reports = Array.isArray(data.sources) ? data.sources : [];
+      const details = reports.map(s => {
+        const fetched = s.lastFetchedAt ? new Date(s.lastFetchedAt).toLocaleString('de-DE') : 'unbekannt';
+        return `${s.source}: ${s.count} (${s.scope}, Datenabruf ${fetched}${s.status === 'unavailable' ? ', nicht erreichbar' : s.status === 'partial' ? ', teils erreichbar' : ''})`;
+      });
+      elements.resultsSources.textContent = details.length
+        ? `Quellen: ${details.join(' · ')}. Kettenangebote sind nicht für eine gewählte Filiale bestätigt.`
+        : 'Keine Angebotsquelle hat Daten geliefert.';
+    }
 
     renderOffers(state.offers);
   } catch (error) {
+    if (requestId !== offersRequestId || error.name === 'AbortError') return;
     console.error('Fehler beim Laden:', error);
     showToast('⚠️ Fehler beim Abrufen der Angebote');
   } finally {
-    state.isLoading = false;
-    elements.loadingSpinner.style.display = 'none';
+    if (requestId === offersRequestId) {
+      state.isLoading = false;
+      elements.loadingSpinner.style.display = 'none';
+    }
   }
 }
 
@@ -701,20 +863,22 @@ function renderOffers(offers) {
     elements.emptyState.style.display = 'block';
     if (state.onlyFavorites && state.favorites.length === 0) {
       elements.emptyStateText.textContent = 'Du hast noch keine Favoriten gespeichert. Klicke auf den Stern ⭐ bei einem Produkt!';
+    } else if (state.offerSources.length && state.offerSources.every(source => source.status === 'unavailable' || source.count === 0)) {
+      elements.emptyStateText.textContent = 'Die Angebotsquellen liefern gerade keine Treffer. Versuche es später erneut oder prüfe eine andere Suche.';
     } else {
       elements.emptyStateText.textContent = 'Probiere einen anderen Suchbegriff oder passe deine Filter an.';
     }
     return;
   }
+  offers = offers.map(safeView);
   elements.emptyState.style.display = 'none';
 
   // Finde das Angebot mit dem absolut niedrigsten Grundpreis
-  let minRefPrice = Infinity;
-  offers.forEach(o => {
-    if (typeof o.referencePrice === 'number' && o.referencePrice > 0 && o.referencePrice < minRefPrice) {
-      minRefPrice = o.referencePrice;
-    }
-  });
+  const pricedOffers = offers.filter(o => typeof o.referencePrice === 'number' && o.referencePrice > 0);
+  const comparable = Boolean(state.query && pricedOffers.length >= 2 &&
+    new Set(pricedOffers.map(o => o.referenceUnit)).size === 1 &&
+    new Set(pricedOffers.map(o => o.categoryId)).size === 1);
+  const minRefPrice = comparable ? Math.min(...pricedOffers.map(o => o.referencePrice)) : Infinity;
 
   // 1. Grid Cards
   const gridHtml = offers.map(offer => {
@@ -764,8 +928,8 @@ function renderOffers(offers) {
                 <div class="price-main-line">
                   <span class="price-main">${offer.formattedPrice}</span>
                   ${offer.formattedOldPrice ? `
-                    <span class="price-old" title="${offer.isEstimatedOldPrice ? 'Referenz-Normalpreis' : 'Statt-Preis'}">
-                      ${offer.isEstimatedOldPrice ? 'UVP ' : 'statt '}${offer.formattedOldPrice}
+                    <span class="price-old" title="${offer.isEstimatedOldPrice ? 'Geschätzter Vergleichspreis, keine belegte Ersparnis' : 'Statt-Preis'}">
+                      ${offer.isEstimatedOldPrice ? 'Vergleich ~' : 'statt '}${offer.formattedOldPrice}
                     </span>
                   ` : ''}
                 </div>
@@ -777,7 +941,7 @@ function renderOffers(offers) {
                 ` : ''}
               </div>
               ${offer.formattedRefPrice ? `
-                <div class="badge-grundpreis ${isBestRef ? 'highlight' : ''}" title="Grundpreis pro Einheit">
+                <div class="badge-grundpreis ${isBestRef ? 'highlight' : ''}" title="${offer.referencePriceSource === 'package' ? 'Aus Packungsgröße berechnet' : 'Grundpreis aus Angebotsquelle'}">
                   ${isBestRef ? '🏆 ' : ''}${offer.formattedRefPrice}
                 </div>
               ` : ''}
@@ -820,7 +984,7 @@ function renderOffers(offers) {
     `;
   }).join('');
 
-  elements.offersGrid.innerHTML = gridHtml;
+  elements.offersGrid.innerHTML = sanitizeHtml(gridHtml);
 
   // 2. Table Rows erstellen
   const tableHtml = offers.map(offer => {
@@ -853,8 +1017,8 @@ function renderOffers(offers) {
             <strong class="table-price-main">${offer.formattedPrice}</strong>
             ${offer.formattedOldPrice ? `
               <div class="table-price-old-line">
-                <span class="table-price-old" title="${offer.isEstimatedOldPrice ? 'Referenz-Normalpreis' : 'Statt-Preis'}">
-                  ${offer.isEstimatedOldPrice ? 'UVP ' : 'statt '}${offer.formattedOldPrice}
+                <span class="table-price-old" title="${offer.isEstimatedOldPrice ? 'Geschätzter Vergleichspreis, keine belegte Ersparnis' : 'Statt-Preis'}">
+                  ${offer.isEstimatedOldPrice ? 'Vergleich ~' : 'statt '}${offer.formattedOldPrice}
                 </span>
                 ${offer.discountPercent ? `<span class="table-price-discount">(-${offer.discountPercent}%)</span>` : ''}
               </div>
@@ -862,7 +1026,7 @@ function renderOffers(offers) {
           </div>
         </td>
         <td class="table-refprice-cell">
-          ${isBestRef ? '🏆 ' : ''}${offer.formattedRefPrice || '—'}
+          ${isBestRef ? '🏆 ' : ''}${offer.formattedRefPrice || '—'}${offer.referencePriceSource === 'package' ? ' (berechnet)' : ''}
         </td>
         <td>
           <div style="display:flex; gap:0.25rem;">
@@ -896,7 +1060,7 @@ function renderOffers(offers) {
     `;
   }).join('');
 
-  elements.offersTableBody.innerHTML = tableHtml;
+  elements.offersTableBody.innerHTML = sanitizeHtml(tableHtml);
 
   // Event Listener für "Auf Einkaufsliste" Buttons
   document.querySelectorAll('.btn-card-add').forEach(btn => {
@@ -949,7 +1113,7 @@ async function loadCategories() {
       </button>
     `).join('');
 
-    elements.categoryChips.innerHTML = chipsHtml;
+    elements.categoryChips.innerHTML = sanitizeHtml(chipsHtml);
 
     elements.categoryChips.querySelectorAll('.category-chip').forEach(chip => {
       chip.addEventListener('click', () => {
@@ -1026,6 +1190,63 @@ function addToBasket(itemOrTitle) {
   }
 }
 
+function renderBasketTemplates() {
+  const select = elements.basketTemplateSelect;
+  if (!select) return;
+  select.replaceChildren();
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'Gespeicherte Listen';
+  select.append(placeholder);
+  for (const template of state.basketTemplates) {
+    const option = document.createElement('option');
+    option.value = template.id;
+    option.textContent = `${template.name} (${template.items.length})`;
+    select.append(option);
+  }
+}
+
+function saveBasketTemplate() {
+  const name = elements.templateNameInput?.value.trim();
+  if (!name || !state.basket.length) {
+    showToast('Name und Artikel für eine Vorlage eingeben.');
+    return;
+  }
+  const items = state.basket.map(it => ({ title: it.title, quantity: it.quantity || 1 }));
+  const existing = state.basketTemplates.find(t => t.name.toLowerCase() === name.toLowerCase());
+  if (existing) existing.items = items;
+  else state.basketTemplates.push({ id: crypto.randomUUID(), name, items });
+  localStorage.setItem('sparfuchs_basket_templates', JSON.stringify(state.basketTemplates));
+  renderBasketTemplates();
+  elements.templateNameInput.value = '';
+  showToast(`Vorlage „${name}“ gespeichert.`);
+}
+
+function loadBasketTemplate() {
+  const template = state.basketTemplates.find(t => t.id === elements.basketTemplateSelect?.value);
+  if (!template) return;
+  for (const it of template.items) {
+    const title = String(it.title || '').trim();
+    if (!title) continue;
+    const quantity = Number.isFinite(it.quantity) && it.quantity > 0 ? it.quantity : 1;
+    const existing = state.basket.find(item => item.title.toLowerCase() === title.toLowerCase() && item.price === 0);
+    if (existing) existing.quantity += quantity;
+    else state.basket.push({ id: crypto.randomUUID(), title, quantity, retailer: 'Einkaufsnotiz (Ohne Festlegung)', price: 0, formattedPrice: '—', checked: false });
+  }
+  saveBasket();
+  renderBasket();
+  showToast(`Vorlage „${template.name}“ geladen. Aktuelle Angebote werden gesucht.`);
+  optimizeBasket();
+}
+
+function deleteBasketTemplate() {
+  const id = elements.basketTemplateSelect?.value;
+  if (!id) return;
+  state.basketTemplates = state.basketTemplates.filter(t => t.id !== id);
+  localStorage.setItem('sparfuchs_basket_templates', JSON.stringify(state.basketTemplates));
+  renderBasketTemplates();
+}
+
 /**
  * Erhöht oder verringert die Stückzahl eines Artikels im Warenkorb
  */
@@ -1096,7 +1317,7 @@ function getItemSavings(item) {
   if (!item || !item.price || item.price <= 0) return 0;
   
   // 1. Echter Streichpreis (validiert)
-  const sanitized = validateAndSanitizeClientPrice(item.price, item.oldPrice, item.isNonFood);
+  const sanitized = getVerifiedOldPrice(item);
   if (sanitized && sanitized > item.price) {
     return sanitized - item.price;
   }
@@ -1132,8 +1353,7 @@ function getItemSavings(item) {
     }
   }
 
-  // 3. Konservativer Schätzwert für Aktionsangebote (~20% Ersparnis)
-  return item.price * 0.25;
+  return 0;
 }
 
 /**
@@ -1187,10 +1407,9 @@ function renderBasket() {
 
     if (typeof item.price === 'number' && item.price > 0) {
       grandTotal += item.price * qty;
-      const sanitizedOld = validateAndSanitizeClientPrice(item.price, item.oldPrice, item.isNonFood);
+      const sanitizedOld = getVerifiedOldPrice(item);
       const effectiveOld = (sanitizedOld && sanitizedOld > item.price)
-        ? sanitizedOld
-        : (item.price * 1.25);
+        ? sanitizedOld : item.price;
       grandOriginalTotal += effectiveOld * qty;
     }
   });
@@ -1198,10 +1417,11 @@ function renderBasket() {
   const grandSavings = Math.max(0, grandOriginalTotal - grandTotal);
 
   // Helper zum Rendern einer einzelnen Artikel-Zeile
-  const renderItemHtml = (it) => {
+  const renderItemHtml = (rawItem) => {
+    const it = safeView(rawItem);
     const qty = (typeof it.quantity === 'number' && it.quantity > 0) ? it.quantity : 1;
     const hasOld = (typeof it.oldPrice === 'number' && it.oldPrice > it.price);
-    const oldPriceVal = hasOld ? it.oldPrice : (it.price > 0 ? it.price * 1.25 : null);
+    const oldPriceVal = hasOld ? getVerifiedOldPrice(it) : null;
     const itemSavingsPerUnit = (oldPriceVal && oldPriceVal > it.price) ? (oldPriceVal - it.price) : 0;
     const itemTotalSavings = itemSavingsPerUnit * qty;
     const itemDiscountPct = (oldPriceVal && oldPriceVal > it.price) ? Math.round((itemSavingsPerUnit / oldPriceVal) * 100) : null;
@@ -1209,9 +1429,10 @@ function renderBasket() {
     const lineTotalFormatted = lineTotal > 0 ? `${lineTotal.toFixed(2).replace('.', ',')} €` : '—';
     const unitPriceFormatted = it.formattedPrice || (it.price > 0 ? `${it.price.toFixed(2).replace('.', ',')} €` : '');
     const cleanTitle = (it.title || '').replace(/\bthisisnobrand123\b/gi, '').trim();
-    const betterDeal = findBetterDeal(it);
-    const itemDeposit = detectDepositClient(it) * qty;
-    const aisle = getItemAisle(it);
+    const betterDealRaw = findBetterDeal(rawItem);
+    const betterDeal = betterDealRaw ? safeView(betterDealRaw) : null;
+    const itemDeposit = detectDepositClient(rawItem) * qty;
+    const aisle = getItemAisle(rawItem);
 
     return `
       <div class="basket-item-wrapper" data-id="${it.id}">
@@ -1299,9 +1520,9 @@ function renderBasket() {
     const storeOfferTotal = items.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 1)), 0);
     const storeOriginalTotal = items.reduce((sum, it) => {
       const qty = it.quantity || 1;
-      const sanitizedOld = validateAndSanitizeClientPrice(it.price, it.oldPrice, it.isNonFood);
+      const sanitizedOld = getVerifiedOldPrice(it);
       if (sanitizedOld && sanitizedOld > it.price) return sum + (sanitizedOld * qty);
-      if (it.price > 0) return sum + ((it.price * 1.25) * qty);
+      if (it.price > 0) return sum + (it.price * qty);
       return sum;
     }, 0);
     const storeSavings = Math.max(0, storeOriginalTotal - storeOfferTotal);
@@ -1329,7 +1550,7 @@ function renderBasket() {
           ${pendingItems.map(renderItemHtml).join('')}
         ` : `
           <div class="store-mode-section-title" style="color:var(--accent-primary);">
-            <span>🎉 Alle Artikel bei ${store} im Wagen!</span>
+            <span>🎉 Alle Artikel bei ${escapeHtml(store)} im Wagen!</span>
           </div>
         `}
 
@@ -1345,11 +1566,11 @@ function renderBasket() {
     }
 
     return `
-      <div class="store-group-card" data-store="${store}">
+      <div class="store-group-card" data-store="${escapeHtml(store)}">
         <div class="store-group-header">
           <div class="store-badge-title">
             <span>🏪</span>
-            <strong>${store}</strong>
+            <strong>${escapeHtml(store)}</strong>
             <span style="font-size:0.75rem; color:var(--text-dim);">(${items.length} Posten)</span>
           </div>
           <div class="store-totals-block">
@@ -1366,7 +1587,7 @@ function renderBasket() {
     `;
   }).join('');
 
-  elements.basketGroupedContainer.innerHTML = groupHtml;
+  elements.basketGroupedContainer.innerHTML = sanitizeHtml(groupHtml);
 
   // Live Supermarkt-Modus Wagenleiste aktualisieren
   if (state.storeMode && elements.storeModeLiveBar) {
@@ -1533,8 +1754,8 @@ function formatBasketShareText() {
     const qty = (typeof item.quantity === 'number' && item.quantity > 0) ? item.quantity : 1;
     if (typeof item.price === 'number' && item.price > 0) {
       grandTotal += item.price * qty;
-      const sanitizedOld = validateAndSanitizeClientPrice(item.price, item.oldPrice, item.isNonFood);
-      const effectiveOld = (sanitizedOld && sanitizedOld > item.price) ? sanitizedOld : (item.price * 1.25);
+      const sanitizedOld = getVerifiedOldPrice(item);
+      const effectiveOld = (sanitizedOld && sanitizedOld > item.price) ? sanitizedOld : item.price;
       grandOriginalTotal += effectiveOld * qty;
     }
   });
@@ -1640,20 +1861,6 @@ async function openQrModal() {
   if (elements.qrCodeSpinner) elements.qrCodeSpinner.style.display = 'block';
   if (elements.qrCodeImg) elements.qrCodeImg.style.display = 'none';
 
-  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-  if (elements.qrHostSelectorBox) {
-    elements.qrHostSelectorBox.style.display = isLocalhost ? 'block' : 'none';
-  }
-
-  // Ziel-Host bestimmen
-  let targetHost = '';
-  if (elements.qrTargetHostInput && elements.qrTargetHostInput.value.trim()) {
-    targetHost = elements.qrTargetHostInput.value.trim();
-  } else if (isLocalhost) {
-    targetHost = localStorage.getItem('sparfuchs_target_host') || 'https://sparfuchs-heo8.onrender.com';
-    if (elements.qrTargetHostInput) elements.qrTargetHostInput.value = targetHost;
-  }
-
   const totalUnits = state.basket.reduce((sum, it) => sum + (it.quantity || 1), 0);
   if (elements.qrItemCountBadge) {
     elements.qrItemCountBadge.textContent = `🛒 ${totalUnits} Artikel (${state.basket.length} Posten)`;
@@ -1666,7 +1873,6 @@ async function openQrModal() {
       body: JSON.stringify({
         items: state.basket,
         zipCode: state.zip,
-        targetHost: targetHost || undefined,
       }),
     });
 
@@ -1779,16 +1985,16 @@ function showImportModal(items) {
   }
 
   if (elements.importItemsPreview) {
-    elements.importItemsPreview.innerHTML = items.map(it => {
+    elements.importItemsPreview.innerHTML = sanitizeHtml(items.map(it => {
       const qtyStr = (it.quantity && it.quantity > 1) ? `<strong>${it.quantity}x</strong> ` : '';
       const priceStr = it.formattedPrice ? ` – ${it.formattedPrice}` : '';
       return `
         <div class="import-preview-item">
-          <span class="import-preview-title">${qtyStr}${it.title}</span>
-          <span class="import-preview-meta">${it.retailer || 'Supermarkt'}${priceStr}</span>
+          <span class="import-preview-title">${qtyStr}${escapeHtml(it.title)}</span>
+          <span class="import-preview-meta">${escapeHtml(it.retailer || 'Supermarkt')}${escapeHtml(priceStr)}</span>
         </div>
       `;
-    }).join('');
+    }).join(''));
   }
 
   elements.importBasketModal.style.display = 'flex';
@@ -1896,7 +2102,8 @@ function updateFavoritesRadar(offers) {
     title.textContent = `${uniqueDeals.length} deiner Lieblingsprodukte diese Woche im Angebot!`;
   }
 
-  grid.innerHTML = uniqueDeals.map(deal => {
+  grid.innerHTML = sanitizeHtml(uniqueDeals.map(rawDeal => {
+    const deal = safeView(rawDeal);
     const sanitizedOld = validateAndSanitizeClientPrice(deal.price, deal.oldPrice, deal.isNonFood);
     const hasOld = sanitizedOld && sanitizedOld > deal.price;
     const oldPriceFormatted = hasOld ? `${sanitizedOld.toFixed(2).replace('.', ',')} €` : '';
@@ -1931,7 +2138,7 @@ function updateFavoritesRadar(offers) {
         </button>
       </div>
     `;
-  }).join('');
+  }).join(''));
 
   container.style.display = 'block';
 
@@ -2056,6 +2263,7 @@ async function optimizeBasket() {
         zipCode: state.zip,
         excludeAppOnly: state.excludeAppOnly,
         preferReferencePrice: state.sortBy === 'refPrice',
+        extraStoreCost: state.extraStoreCost,
         activeRetailers: (Array.isArray(state.activeStores) && state.activeStores.length > 0) ? state.activeStores : undefined,
       }),
     });
@@ -2107,11 +2315,11 @@ function renderOptimizationResult(opt) {
   const champion = opt.singleStoreChampion;
   const split = opt.smartSplit;
   const bestPerItem = opt.bestPerItem || [];
-  const splitSavings = opt.splitSavingsVsSingle || 0;
+  const splitSavings = opt.splitNetSaving;
 
   // Bestimme den primär empfohlenen Plan ('split' oder 'champion' oder 'best') - Smart Split ist Standard
   const hasSplit = split && split.stores && split.stores.length === 2;
-  let activePlan = hasSplit ? 'split' : (champion ? 'champion' : (bestPerItem.length > 0 ? 'best' : null));
+  let activePlan = hasSplit && splitSavings > 0 ? 'split' : (champion ? 'champion' : (bestPerItem.length > 0 ? 'best' : null));
 
   // Wir halten eine lokale Kopie der Plan-Items für den interaktiven Deal-Tausch (Alternativen)
   const planItemsCache = {};
@@ -2143,6 +2351,7 @@ function renderOptimizationResult(opt) {
 
     planItemsCache[plan] = items.map(item => ({
       query: item.query,
+      quantity: item.quantity || 1,
       offer: { ...item.offer },
       isAdditionalStore: Boolean(item.isAdditionalStore),
       alternatives: Array.isArray(item.alternatives) ? item.alternatives.map(a => ({ ...a })) : [],
@@ -2160,10 +2369,10 @@ function renderOptimizationResult(opt) {
           <button type="button" class="btn-plan-tab ${activePlan === 'split' ? 'active' : ''}" data-plan="split" style="flex:1; min-width:140px; padding:0.6rem 0.5rem; border-radius:var(--radius-sm); border:1px solid ${activePlan === 'split' ? 'var(--accent-primary)' : 'var(--border-subtle)'}; background:${activePlan === 'split' ? 'rgba(0,229,153,0.12)' : 'rgba(255,255,255,0.03)'}; color:${activePlan === 'split' ? 'var(--accent-primary)' : 'var(--text-muted)'}; font-weight:700; font-size:0.8rem; cursor:pointer; text-align:left;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <span>⚡ Smart Split (2 Läden)</span>
-              ${splitSavings > 0 ? `<span style="font-size:0.72rem; color:var(--accent-primary); background:rgba(0,229,153,0.18); padding:0.1rem 0.35rem; border-radius:4px;">+${splitSavings.toFixed(2).replace('.', ',')} € Ersparnis</span>` : ''}
+              ${splitSavings !== null ? `<span style="font-size:0.72rem; color:var(--accent-primary); background:rgba(0,229,153,0.18); padding:0.1rem 0.35rem; border-radius:4px;">${splitSavings > 0 ? '+' : ''}${splitSavings.toFixed(2).replace('.', ',')} € nach Zusatzkosten</span>` : ''}
             </div>
             <div style="font-size:0.85rem; font-weight:700; color:#e2e8f0; margin-top:0.25rem;">
-              🛒 ${split.stores.join(' + ')}
+              🛒 ${split.stores.map(escapeHtml).join(' + ')} · ${split.matchedCount}/${opt.totalItemsRequested} Treffer
             </div>
           </button>
         ` : ''}
@@ -2174,7 +2383,7 @@ function renderOptimizationResult(opt) {
               <span style="font-size:0.72rem; color:var(--text-dim);">${champion.matchedCount}/${opt.totalItemsRequested} Treffer</span>
             </div>
             <div style="font-size:0.85rem; font-weight:700; color:#e2e8f0; margin-top:0.25rem;">
-              🛒 ${champion.retailer}
+              🛒 ${escapeHtml(champion.retailer)}
             </div>
           </button>
         ` : ''}
@@ -2192,13 +2401,26 @@ function renderOptimizationResult(opt) {
       </div>
     `;
 
+    const planMissing = activePlan === 'split' ? (split?.missingItems || [])
+      : activePlan === 'champion' ? (champion?.missingItems || [])
+        : (opt.itemQueries || []).filter(query => !bestPerItem.some(it => it.query === query));
+    if (planMissing.length) {
+      html += `<p class="opt-missing-note">⚠️ Für ${planMissing.length} Artikel kein passendes Angebot: ${planMissing.map(escapeHtml).join(', ')}. Diese Artikel bleiben auf deiner Liste.</p>`;
+    }
+    const planStores = activePlan === 'split' ? (split?.stores || [])
+      : activePlan === 'champion' ? [champion?.retailer] : [...new Set(items.map(it => it.offer?.retailer))];
+    const branchLinks = planStores.map(chain => state.selectedMarkets.find(m => m.chain?.toLowerCase() === chain?.toLowerCase())).filter(Boolean);
+    if (branchLinks.length) {
+      html += `<div class="opt-branch-links">${branchLinks.map(m => `<a href="${escapeHtml(m.mapsUrl)}" target="_blank" rel="noopener noreferrer">📍 ${escapeHtml(m.name)} (${m.distanceKm} km) in Google Maps</a>`).join('')}</div>`;
+    }
+
     if (items.length === 0) {
       html += `
         <div style="color:var(--text-dim); padding:1rem; text-align:center; font-size:0.85rem;">
           Keine passenden Angebote gefunden.
         </div>
       `;
-      container.innerHTML = html;
+      container.innerHTML = sanitizeHtml(html);
       return;
     }
 
@@ -2210,7 +2432,7 @@ function renderOptimizationResult(opt) {
 
       <div class="opt-items-selection-box" id="optItemsList">
         ${items.map((it, idx) => {
-          const off = it.offer;
+          const off = safeView(it.offer);
           const cleanTitle = cleanProductTitle(off.title);
           const brandText = cleanBrandName(off.brand);
           const alts = Array.isArray(it.alternatives) ? it.alternatives : [];
@@ -2229,7 +2451,7 @@ function renderOptimizationResult(opt) {
                     <div class="opt-item-title">${it.quantity && it.quantity > 1 ? `<span class="opt-qty-badge" style="background:rgba(0,229,153,0.15); color:var(--accent-primary); padding:0.1rem 0.4rem; border-radius:4px; font-weight:700; margin-right:0.35rem; font-size:0.8rem;">${it.quantity}x</span>` : ''}${cleanTitle}</div>
                     <div class="opt-item-sub">
                       <span class="opt-item-store-tag" data-retailer="${off.retailer}">${off.retailer}</span>
-                      <span>für <em>„${it.query}“</em></span>
+                      <span>für <em>„${escapeHtml(it.query)}“</em></span>
                       ${brandText && brandText !== 'Eigenmarke' ? `<span>• ${brandText}</span>` : ''}
                     </div>
                     ${it.isAdditionalStore ? `
@@ -2251,17 +2473,18 @@ function renderOptimizationResult(opt) {
                   </div>
                   <div class="opt-alts-list">
                     ${alts.map((alt, altIdx) => {
-                      const altCleanTitle = cleanProductTitle(alt.title);
+                      const altView = safeView(alt);
+                      const altCleanTitle = cleanProductTitle(altView.title);
                       const altPriceStr = alt.formattedPrice || (alt.price.toFixed(2).replace('.', ',') + ' €');
                       return `
-                        <button type="button" class="btn-opt-swap-alt" data-item-idx="${idx}" data-alt-idx="${altIdx}" title="Zu ${alt.retailer}: ${altCleanTitle} (${altPriceStr}) wechseln">
+                        <button type="button" class="btn-opt-swap-alt" data-item-idx="${idx}" data-alt-idx="${altIdx}" title="Zu ${altView.retailer}: ${altCleanTitle} (${escapeHtml(altPriceStr)}) wechseln">
                           <div class="opt-alt-left">
-                            <span class="opt-alt-badge" data-retailer="${alt.retailer}">${alt.retailer}</span>
+                            <span class="opt-alt-badge" data-retailer="${altView.retailer}">${altView.retailer}</span>
                             <span class="opt-alt-name">${altCleanTitle}</span>
                           </div>
                           <div class="opt-alt-right">
-                            <span class="opt-alt-price">${altPriceStr}</span>
-                            ${alt.formattedOldPrice ? `<span class="opt-alt-old">${alt.formattedOldPrice}</span>` : ''}
+                            <span class="opt-alt-price">${escapeHtml(altPriceStr)}</span>
+                            ${altView.formattedOldPrice ? `<span class="opt-alt-old">${altView.formattedOldPrice}</span>` : ''}
                             <span class="opt-alt-action">Tauschen ⇄</span>
                           </div>
                         </button>
@@ -2282,7 +2505,7 @@ function renderOptimizationResult(opt) {
       </div>
     `;
 
-    container.innerHTML = html;
+    container.innerHTML = sanitizeHtml(html);
 
     // Listener für Plan-Tabs (Switch zwischen Single-Store, Smart Split und Alle Märkte)
     container.querySelectorAll('.btn-plan-tab').forEach(btn => {
@@ -2737,7 +2960,7 @@ function closeDealSwapModal() {
  */
 const ALL_SUPERMARKETS = [
   'Lidl', 'Aldi Nord', 'Aldi Süd', 'REWE', 'REWE Center', 'Kaufland',
-  'Edeka', 'Penny', 'Netto Marken-Discount', 'Netto mit dem Hund',
+  'Edeka', 'Edeka Center', 'Penny', 'Netto Marken-Discount', 'Netto mit dem Hund',
   'Norma'
 ];
 
@@ -2746,6 +2969,13 @@ const DISCOUNTER_STORES = ['Lidl', 'Aldi Nord', 'Aldi Süd', 'Penny', 'Netto Mar
 const DISCONTINUED_STORES = ['Alnatura', 'Denns BioMarkt', 'tegut...', 'Globus', 'Hit'];
 
 function initActiveStores() {
+  if (Array.isArray(state.selectedMarkets) && state.selectedMarkets.length > 0) {
+    state.activeStores = [...new Set(state.selectedMarkets.map(m => m.chain).filter(Boolean))];
+    localStorage.setItem('sparfuchs_active_stores', JSON.stringify(state.activeStores));
+    updateStoresBadge();
+    renderRetailerChips();
+    return;
+  }
   if (!state.activeStores || !Array.isArray(state.activeStores) || state.activeStores.length === 0) {
     state.activeStores = [...ALL_SUPERMARKETS];
     localStorage.setItem('sparfuchs_active_stores', JSON.stringify(state.activeStores));
@@ -2757,6 +2987,10 @@ function initActiveStores() {
     if (state.activeStores.includes('REWE') && !state.activeStores.includes('REWE Center')) {
       const idx = state.activeStores.indexOf('REWE');
       state.activeStores.splice(idx + 1, 0, 'REWE Center');
+    }
+    if (state.activeStores.includes('Edeka') && !state.activeStores.includes('Edeka Center')) {
+      const idx = state.activeStores.indexOf('Edeka');
+      state.activeStores.splice(idx + 1, 0, 'Edeka Center');
     }
     // Migration: Netto mit dem Hund ergänzen falls fehlt
     if (!state.activeStores.includes('Netto mit dem Hund')) {
@@ -2799,7 +3033,7 @@ function renderRetailerChips() {
 
   const isAllActive = state.retailer === 'all';
 
-  elements.retailerChipsContainer.innerHTML = `
+  elements.retailerChipsContainer.innerHTML = sanitizeHtml`
     <button type="button" class="chip-retailer ${isAllActive ? 'active' : ''}" data-retailer="all">
       Alle aktiven Märkte (${activeStores.length})
     </button>
@@ -2836,17 +3070,165 @@ function renderRetailerChips() {
 }
 
 function openStoresModal() {
-  if (!elements.storesCheckboxList || !elements.storesModal) return;
-
-  elements.storesCheckboxList.innerHTML = ALL_SUPERMARKETS.map(store => `
-    <label class="store-checkbox-item">
-      <input type="checkbox" value="${store}" ${state.activeStores.includes(store) ? 'checked' : ''}>
-      <span>${store}</span>
-    </label>
-  `).join('');
-
+  if (!elements.storesModal) return;
+  marketSelectionDraft = new Map(state.selectedMarkets.map(market => [market.chain, market]));
+  elements.marketChainSelect.replaceChildren();
+  for (const chain of ALL_SUPERMARKETS) {
+    const option = document.createElement('option');
+    option.value = chain;
+    option.textContent = chain;
+    elements.marketChainSelect.append(option);
+  }
+  elements.marketChainSelect.value = state.selectedMarkets[0]?.chain || ALL_SUPERMARKETS[0];
+  elements.marketSearchZipInput.value = state.zip;
+  renderSelectedMarketDraft();
+  state.nearbyMarkets = [];
+  renderNearbyMarkets();
   elements.storesModal.style.display = 'flex';
   elements.storesModal.setAttribute('aria-hidden', 'false');
+  ensureMarketMap();
+  requestAnimationFrame(() => marketMap?.invalidateSize());
+  loadNearbyMarkets();
+}
+
+let marketMap = null;
+let marketMarkers = null;
+let marketSelectionDraft = new Map();
+let marketSearchRequestId = 0;
+
+function ensureMarketMap() {
+  if (marketMap || !window.L || !elements.marketMap) return;
+  marketMap = L.map(elements.marketMap).setView([51.16, 10.45], 6);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap-Mitwirkende</a>',
+  }).addTo(marketMap);
+  marketMarkers = L.layerGroup().addTo(marketMap);
+}
+
+function renderSelectedMarketDraft() {
+  const container = elements.selectedMarketsList;
+  if (!container) return;
+  container.replaceChildren();
+  if (!marketSelectionDraft.size) {
+    const empty = document.createElement('p');
+    empty.textContent = 'Noch keine Filiale gewählt. Wähle zuerst eine Kette.';
+    container.append(empty);
+    return;
+  }
+  for (const [chain, market] of marketSelectionDraft) {
+    const row = document.createElement('div');
+    row.className = 'selected-market-row';
+    const label = document.createElement('span');
+    label.textContent = `${chain}: ${market.name}${market.address ? ` · ${market.address}` : ''}`;
+    const mapLink = document.createElement('a');
+    mapLink.href = market.mapsUrl;
+    mapLink.target = '_blank';
+    mapLink.rel = 'noopener noreferrer';
+    mapLink.textContent = 'Google Maps';
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = 'Entfernen';
+    remove.setAttribute('aria-label', `${chain} entfernen`);
+    remove.addEventListener('click', () => {
+      marketSelectionDraft.delete(chain);
+      renderSelectedMarketDraft();
+      renderNearbyMarkets();
+    });
+    row.append(label, mapLink, remove);
+    container.append(row);
+  }
+}
+
+function selectMarketForChain(market) {
+  marketSelectionDraft.set(market.chain, market);
+  renderSelectedMarketDraft();
+  renderNearbyMarkets();
+  elements.nearbyMarketsStatus.textContent = `${market.name} für ${market.chain} vorgemerkt. Mit „Auswahl speichern“ übernehmen.`;
+}
+
+function renderNearbyMarkets() {
+  const container = elements.nearbyMarketsList;
+  if (!container) return;
+  container.replaceChildren();
+  marketMarkers?.clearLayers();
+  const markets = state.nearbyMarkets;
+  const selectedId = marketSelectionDraft.get(elements.marketChainSelect.value)?.id;
+  if (!markets.length) {
+    return;
+  }
+  for (const market of markets) {
+    const row = document.createElement('div');
+    row.className = `nearby-market-row${selectedId === market.id ? ' selected' : ''}`;
+    const details = document.createElement('div');
+    details.className = 'market-details';
+    const name = document.createElement('strong');
+    name.textContent = market.name;
+    const meta = document.createElement('small');
+    meta.textContent = `${market.address || market.chain} · ${market.distanceKm} km`;
+    details.append(name, meta);
+    const select = document.createElement('button');
+    select.type = 'button';
+    select.textContent = selectedId === market.id ? 'Gewählt' : 'Wählen';
+    select.addEventListener('click', () => selectMarketForChain(market));
+    const mapLink = document.createElement('a');
+    mapLink.href = market.mapsUrl;
+    mapLink.target = '_blank';
+    mapLink.rel = 'noopener noreferrer';
+    mapLink.textContent = 'Google Maps';
+    row.append(details, select, mapLink);
+    container.append(row);
+    if (marketMarkers) {
+      const chosen = selectedId === market.id;
+      const marker = L.circleMarker([market.lat, market.lon], {
+        radius: chosen ? 11 : 8,
+        color: chosen ? '#ffffff' : '#073b2a',
+        weight: 2,
+        fillColor: chosen ? '#00e599' : '#24a5f4',
+        fillOpacity: 0.95,
+      }).addTo(marketMarkers);
+      const tooltip = document.createElement('span');
+      tooltip.textContent = `${market.name}${market.address ? ` · ${market.address}` : ''}`;
+      marker.bindTooltip(tooltip, { direction: 'top' });
+      marker.on('click', () => selectMarketForChain(market));
+    }
+  }
+}
+
+async function loadNearbyMarkets(useMapCenter = false) {
+  const button = elements.findNearbyMarketsBtn;
+  if (!button) return;
+  const zip = elements.marketSearchZipInput.value.trim();
+  if (!/^\d{5}$/.test(zip)) {
+    elements.nearbyMarketsStatus.textContent = 'Bitte eine gültige fünfstellige PLZ eingeben.';
+    return;
+  }
+  const requestId = ++marketSearchRequestId;
+  button.disabled = true;
+  elements.nearbyMarketsStatus.textContent = 'Suche Filialen…';
+  try {
+    const params = new URLSearchParams({ zip, radius: elements.marketRadiusSelect.value, chain: elements.marketChainSelect.value });
+    if (useMapCenter && marketMap) {
+      const center = marketMap.getCenter();
+      params.set('lat', String(center.lat));
+      params.set('lon', String(center.lng));
+    }
+    const response = await fetch(`/api/markets?${params}`);
+    const data = await response.json();
+    if (requestId !== marketSearchRequestId) return;
+    if (!response.ok) throw new Error(data.error || 'Filialen konnten nicht geladen werden');
+    state.nearbyMarkets = data.markets || [];
+    if (!useMapCenter && marketMap) {
+      const zoom = Number(elements.marketRadiusSelect.value) > 15 ? 10 : 12;
+      marketMap.setView([data.origin.lat, data.origin.lon], zoom);
+    }
+    renderNearbyMarkets();
+    elements.nearbyMarketsStatus.textContent = `${state.nearbyMarkets.length} Filialen von ${elements.marketChainSelect.value} gefunden. Marker anklicken, dann Auswahl speichern.`;
+  } catch (error) {
+    if (requestId === marketSearchRequestId) elements.nearbyMarketsStatus.textContent = `Filialsuche fehlgeschlagen: ${error.message}`;
+  } finally {
+    if (requestId === marketSearchRequestId) button.disabled = false;
+  }
 }
 
 function closeStoresModal() {
@@ -2857,21 +3239,25 @@ function closeStoresModal() {
 }
 
 function saveActiveStores() {
-  if (!elements.storesCheckboxList) return;
-  const checkedBoxes = Array.from(elements.storesCheckboxList.querySelectorAll('input:checked'));
-  const selected = checkedBoxes.map(cb => cb.value);
-
-  if (selected.length === 0) {
-    showToast('⚠️ Bitte wähle mindestens einen Supermarkt aus!');
+  if (!marketSelectionDraft.size) {
+    showToast('⚠️ Bitte wähle mindestens eine Filiale auf der Karte aus.');
     return;
   }
-
-  state.activeStores = selected;
-  localStorage.setItem('sparfuchs_active_stores', JSON.stringify(selected));
+  state.selectedMarkets = [...marketSelectionDraft.values()];
+  state.activeStores = [...marketSelectionDraft.keys()];
+  const zip = elements.marketSearchZipInput.value.trim();
+  if (/^\d{5}$/.test(zip)) {
+    state.zip = zip;
+    elements.plzInput.value = zip;
+    elements.basketPlzDisplay.textContent = zip;
+    localStorage.setItem('sparfuchs_zip', zip);
+  }
+  localStorage.setItem('sparfuchs_selected_markets', JSON.stringify(state.selectedMarkets));
+  localStorage.setItem('sparfuchs_active_stores', JSON.stringify(state.activeStores));
   updateStoresBadge();
   renderRetailerChips();
   closeStoresModal();
-  showToast(`✅ ${selected.length} Supermärkte aktiviert`);
+  showToast(`✅ ${state.selectedMarkets.length} Filialen gespeichert`);
   fetchOffers();
 }
 
@@ -2906,15 +3292,15 @@ function renderFavHubList() {
     return;
   }
 
-  elements.favListContainer.innerHTML = state.favorites.map((fav, idx) => `
+  elements.favListContainer.innerHTML = sanitizeHtml(state.favorites.map((fav, idx) => `
     <div class="fav-hub-item">
       <div class="fav-hub-item-left">
         <span class="fav-hub-star">⭐</span>
-        <span class="fav-hub-text">${fav}</span>
+        <span class="fav-hub-text">${escapeHtml(fav)}</span>
       </div>
       <button type="button" class="btn-fav-hub-delete" data-index="${idx}" title="Favorit entfernen">✕</button>
     </div>
-  `).join('');
+  `).join(''));
 
   elements.favListContainer.querySelectorAll('.btn-fav-hub-delete').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -3072,9 +3458,9 @@ function renderRecipePreview(recipe) {
 
   state.recipeIngredients = recipe.ingredients;
 
-  elements.recipeResultPreview.innerHTML = `
+  elements.recipeResultPreview.innerHTML = sanitizeHtml`
     <div class="recipe-preview-header">
-      <strong>🍲 ${recipe.title || 'Rezept-Zutaten'}</strong>
+      <strong>🍲 ${escapeHtml(recipe.title || 'Rezept-Zutaten')}</strong>
       <span class="recipe-count-badge">${recipe.ingredients.length} Zutaten</span>
     </div>
     <ul class="recipe-ing-list">
@@ -3082,7 +3468,7 @@ function renderRecipePreview(recipe) {
         const ingName = ing.name || ing.query || ing.original;
         return `
           <li>
-            <span>${ing.amount ? ing.amount + ' ' : ''}${ing.unit ? ing.unit + ' ' : ''}<strong>${ingName}</strong></span>
+            <span>${escapeHtml(ing.amount ? ing.amount + ' ' : '')}${escapeHtml(ing.unit ? ing.unit + ' ' : '')}<strong>${escapeHtml(ingName)}</strong></span>
           </li>
         `;
       }).join('')}
@@ -3115,10 +3501,10 @@ function renderRecipePreview(recipe) {
         elements.recipeUrlInput.value = '';
       }
 
-      elements.recipeResultPreview.innerHTML = `
+      elements.recipeResultPreview.innerHTML = sanitizeHtml`
         <div class="recipe-success-box" style="background:rgba(0,229,153,0.1); border:1px solid rgba(0,229,153,0.3); border-radius:var(--radius-sm); padding:0.75rem; text-align:center;">
           <div style="font-weight:700; color:var(--accent-primary); font-size:0.85rem;">
-            ✅ „${recipe.title || 'Rezept'}“ hinzugefügt (${count} Zutaten)!
+            ✅ „${escapeHtml(recipe.title || 'Rezept')}“ hinzugefügt (${count} Zutaten)!
           </div>
           <p style="font-size:0.75rem; color:var(--text-dim); margin:0.3rem 0 0.5rem 0;">
             Du kannst nun direkt ein weiteres Rezept oben einfügen.
@@ -3247,7 +3633,7 @@ function updateHistoryBadge() {
  */
 async function fetchAndRenderHistory() {
   try {
-    const res = await fetch('/api/history');
+    const res = await fetch('/api/history', { headers: historyHeaders() });
     if (res.ok) {
       const data = await res.json();
       const serverHistory = Array.isArray(data.history) ? data.history : [];
@@ -3258,7 +3644,7 @@ async function fetchAndRenderHistory() {
         try {
           const syncRes = await fetch('/api/history/sync', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...historyHeaders() },
             body: JSON.stringify({ clientHistory: state.history }),
           });
           if (syncRes.ok) {
@@ -3294,11 +3680,68 @@ async function fetchAndRenderHistory() {
 /**
  * Bucht den aktuellen Einkaufszettel verbindlich in die Historie ein
  */
-async function bookCurrentBasket() {
-  if (!state.basket || state.basket.length === 0) {
+function openCheckoutReview() {
+  if (!state.basket?.length) {
     showToast('⚠️ Dein Einkaufszettel ist leer! Füge zuerst Artikel hinzu.');
     return;
   }
+  const container = elements.checkoutReviewItems;
+  container.replaceChildren();
+  state.basket.forEach((item, index) => {
+    const row = document.createElement('div');
+    row.className = 'checkout-review-row';
+    row.dataset.index = String(index);
+    const bought = document.createElement('input');
+    bought.type = 'checkbox';
+    bought.checked = true;
+    bought.className = 'checkout-bought';
+    bought.setAttribute('aria-label', `${item.title} gekauft`);
+    const description = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = `${item.quantity || 1}× ${item.title}`;
+    const store = document.createElement('small');
+    store.textContent = item.retailer || 'Einkaufsnotiz';
+    description.append(title, store);
+    const price = document.createElement('input');
+    price.type = 'number';
+    price.min = '0';
+    price.step = '0.01';
+    price.value = item.price > 0 ? item.price.toFixed(2) : '';
+    price.placeholder = 'Preis €';
+    price.className = 'checkout-actual-price';
+    price.setAttribute('aria-label', `Tatsächlicher Einzelpreis für ${item.title}`);
+    row.append(bought, description, price);
+    container.append(row);
+  });
+  elements.checkoutReviewDialog.showModal();
+}
+
+function confirmCheckoutReview() {
+  const purchased = [];
+  const remaining = [];
+  for (const row of elements.checkoutReviewItems.querySelectorAll('.checkout-review-row')) {
+    const original = state.basket[Number(row.dataset.index)];
+    if (!row.querySelector('.checkout-bought').checked) {
+      remaining.push(original);
+      continue;
+    }
+    const actualPrice = Number(row.querySelector('.checkout-actual-price').value);
+    if (!Number.isFinite(actualPrice) || actualPrice <= 0) {
+      showToast(`Bitte einen bezahlten Preis für „${original.title}“ eingeben.`);
+      return;
+    }
+    purchased.push({ ...original, price: actualPrice, formattedPrice: `${actualPrice.toFixed(2).replace('.', ',')} €` });
+  }
+  if (!purchased.length) {
+    showToast('Kein gekaufter Artikel ausgewählt.');
+    return;
+  }
+  elements.checkoutReviewDialog.close();
+  bookCurrentBasket(purchased, remaining);
+}
+
+async function bookCurrentBasket(itemsToBook, remainingItems = []) {
+  if (!itemsToBook?.length) return;
 
   // Berechnung der Gesamtsummen und Ersparnisse
   let totalPaid = 0;
@@ -3306,7 +3749,7 @@ async function bookCurrentBasket() {
   let totalUnits = 0;
   const storesSet = new Set();
 
-  state.basket.forEach(it => {
+  itemsToBook.forEach(it => {
     const store = it.retailer || 'Einkaufsnotizen';
     storesSet.add(store);
     const qty = (typeof it.quantity === 'number' && it.quantity > 0) ? it.quantity : 1;
@@ -3314,10 +3757,9 @@ async function bookCurrentBasket() {
 
     if (typeof it.price === 'number' && it.price > 0) {
       totalPaid += it.price * qty;
-      const sanitizedOld = validateAndSanitizeClientPrice(it.price, it.oldPrice, it.isNonFood);
+      const sanitizedOld = getVerifiedOldPrice(it);
       const effectiveOld = (sanitizedOld && sanitizedOld > it.price)
-        ? sanitizedOld
-        : (it.price * 1.25);
+        ? sanitizedOld : it.price;
       totalRegular += effectiveOld * qty;
     }
   });
@@ -3326,12 +3768,11 @@ async function bookCurrentBasket() {
   const stores = Array.from(storesSet);
 
   // Snapshot der Artikel
-  const itemsSnapshot = state.basket.map(it => {
+  const itemsSnapshot = itemsToBook.map(it => {
     const qty = (typeof it.quantity === 'number' && it.quantity > 0) ? it.quantity : 1;
-    const sanitizedOld = validateAndSanitizeClientPrice(it.price, it.oldPrice, it.isNonFood);
+    const sanitizedOld = getVerifiedOldPrice(it);
     const effectiveOld = (sanitizedOld && sanitizedOld > it.price)
-      ? sanitizedOld
-      : (it.price > 0 ? it.price * 1.25 : null);
+      ? sanitizedOld : null;
     return {
       title: it.title,
       retailer: it.retailer || 'Einkaufsnotizen',
@@ -3362,7 +3803,7 @@ async function bookCurrentBasket() {
   try {
     const res = await fetch('/api/history', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...historyHeaders() },
       body: JSON.stringify(payload),
     });
 
@@ -3374,8 +3815,8 @@ async function bookCurrentBasket() {
     localStorage.setItem('sparfuchs_history', JSON.stringify(state.history));
 
     // Einkaufszettel leeren
-    state.basket = [];
-    localStorage.removeItem('sparfuchs_basket_v2');
+    state.basket = remainingItems;
+    saveBasket();
     renderBasket();
 
     // Drawer wechseln
@@ -3405,7 +3846,7 @@ async function deleteReceipt(receiptId) {
   if (!confirm('Diesen Einkaufsbeleg wirklich aus der Historie entfernen?')) return;
 
   try {
-    const res = await fetch(`/api/history/${encodeURIComponent(receiptId)}`, { method: 'DELETE' });
+    const res = await fetch(`/api/history/${encodeURIComponent(receiptId)}`, { method: 'DELETE', headers: historyHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const data = await res.json();
@@ -3429,7 +3870,7 @@ async function clearAllHistory() {
   if (!confirm('Möchtest du wirklich die gesamte Einkaufs-Historie und alle Haushaltsstatistiken unwiderruflich löschen?')) return;
 
   try {
-    const res = await fetch('/api/history', { method: 'DELETE' });
+    const res = await fetch('/api/history', { method: 'DELETE', headers: historyHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const data = await res.json();
@@ -3516,7 +3957,7 @@ function renderHistoryUI(stats, receipts = []) {
           <div class="store-bar-item">
             <div class="store-bar-header">
               <span class="store-bar-name">
-                <span>🛒</span> ${st.store}
+                <span>🛒</span> ${escapeHtml(st.store)}
                 <span style="font-size:0.75rem; color:var(--text-dim); font-weight:normal;">(${st.tripsCount} ${st.tripsCount === 1 ? 'Einkauf' : 'Einkäufe'})</span>
               </span>
               <div class="store-bar-figures">
@@ -3530,7 +3971,7 @@ function renderHistoryUI(stats, receipts = []) {
           </div>
         `;
       }).join('');
-      elements.historyStoreBarsContainer.innerHTML = storeHtml;
+      elements.historyStoreBarsContainer.innerHTML = sanitizeHtml(storeHtml);
     }
   }
 
@@ -3547,7 +3988,7 @@ function renderHistoryUI(stats, receipts = []) {
         <div class="monthly-row-item">
           <div class="monthly-col-date">
             <span>🗓️</span>
-            <strong>${m.label}</strong>
+            <strong>${escapeHtml(m.label)}</strong>
             <span class="monthly-badge-count">(${m.tripsCount} ${m.tripsCount === 1 ? 'Einkauf' : 'Einkäufe'})</span>
           </div>
           <div class="monthly-col-stats">
@@ -3556,7 +3997,7 @@ function renderHistoryUI(stats, receipts = []) {
           </div>
         </div>
       `).join('');
-      elements.historyMonthlyContainer.innerHTML = monthHtml;
+      elements.historyMonthlyContainer.innerHTML = sanitizeHtml(monthHtml);
     }
   }
 
@@ -3578,16 +4019,16 @@ function renderHistoryUI(stats, receipts = []) {
         const hasItems = items.length > 0;
 
         return `
-          <div class="receipt-card" data-receipt-id="${rc.id}">
+          <div class="receipt-card" data-receipt-id="${escapeHtml(rc.id)}">
             <div class="receipt-header-row">
               <div class="receipt-date-group">
-                <span class="receipt-date">${dateFormatted}</span>
+                <span class="receipt-date">${escapeHtml(dateFormatted)}</span>
                 <div class="receipt-stores">
-                  ${stores.map(st => `<span class="receipt-stores-tag">${st}</span>`).join('')}
+                  ${stores.map(st => `<span class="receipt-stores-tag">${escapeHtml(st)}</span>`).join('')}
                 </div>
               </div>
               <div class="receipt-actions">
-                <button class="btn-del-receipt" data-receipt-id="${rc.id}" title="Beleg aus Historie löschen">🗑️</button>
+                <button class="btn-del-receipt" data-receipt-id="${escapeHtml(rc.id)}" title="Beleg aus Historie löschen">🗑️</button>
               </div>
             </div>
 
@@ -3603,23 +4044,23 @@ function renderHistoryUI(stats, receipts = []) {
             </div>
 
             ${hasItems ? `
-              <button type="button" class="receipt-accordion-toggle" data-receipt-id="${rc.id}">
+              <button type="button" class="receipt-accordion-toggle" data-receipt-id="${escapeHtml(rc.id)}">
                 <span>📋</span>
                 <span>${items.length} Artikel anzeigen ▾</span>
               </button>
-              <div class="receipt-details-list" id="receipt-details-${rc.id}">
+              <div class="receipt-details-list" id="receipt-details-${escapeHtml(rc.id)}">
                 ${items.map(it => {
                   const itPriceStr = it.formattedPrice || (it.price ? `${it.price.toFixed(2).replace('.', ',')} €` : '');
                   const itOldStr = it.formattedOldPrice || (it.oldPrice ? `${it.oldPrice.toFixed(2).replace('.', ',')} €` : '');
                   return `
                     <div class="receipt-detail-item">
                       <span class="item-title">
-                        ${it.checked ? '✓ ' : '• '} ${it.quantity && it.quantity > 1 ? `<strong>${it.quantity}x</strong> ` : ''}${it.title} 
-                        <small style="color:var(--text-dim);">(${it.retailer})</small>
+                        ${it.checked ? '✓ ' : '• '} ${it.quantity && it.quantity > 1 ? `<strong>${it.quantity}x</strong> ` : ''}${escapeHtml(it.title)} 
+                        <small style="color:var(--text-dim);">(${escapeHtml(it.retailer)})</small>
                       </span>
                       <span>
-                        <strong>${itPriceStr}</strong>
-                        ${itOldStr && itOldStr !== itPriceStr ? `<span style="font-size:0.72rem; color:var(--text-dim); text-decoration:line-through; margin-left:0.3rem;">${itOldStr}</span>` : ''}
+                        <strong>${escapeHtml(itPriceStr)}</strong>
+                        ${itOldStr && itOldStr !== itPriceStr ? `<span style="font-size:0.72rem; color:var(--text-dim); text-decoration:line-through; margin-left:0.3rem;">${escapeHtml(itOldStr)}</span>` : ''}
                       </span>
                     </div>
                   `;
@@ -3630,7 +4071,7 @@ function renderHistoryUI(stats, receipts = []) {
         `;
       }).join('');
 
-      elements.receiptsListContainer.innerHTML = receiptsHtml;
+      elements.receiptsListContainer.innerHTML = sanitizeHtml(receiptsHtml);
 
       // Event Listener für Accordion Toggle
       elements.receiptsListContainer.querySelectorAll('.receipt-accordion-toggle').forEach(btn => {
@@ -3831,6 +4272,12 @@ function initEvents() {
   const updateZip = () => {
     const val = elements.plzInput.value.trim();
     if (/^[0-9]{5}$/.test(val)) {
+      if (val !== state.zip) {
+        // Exact branches belong to the previous location; keep the chain choices.
+        state.nearbyMarkets = [];
+        state.selectedMarkets = [];
+        localStorage.removeItem('sparfuchs_selected_markets');
+      }
       state.zip = val;
       localStorage.setItem('sparfuchs_zip', val);
       elements.basketPlzDisplay.textContent = val;
@@ -3918,25 +4365,18 @@ function initEvents() {
   if (elements.closeStoresModalBtn) {
     elements.closeStoresModalBtn.addEventListener('click', closeStoresModal);
   }
-  if (elements.selectAllStoresBtn) {
-    elements.selectAllStoresBtn.addEventListener('click', () => {
-      if (elements.storesCheckboxList) {
-        elements.storesCheckboxList.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = true; });
-      }
-    });
-  }
-  if (elements.selectDiscStoresBtn) {
-    elements.selectDiscStoresBtn.addEventListener('click', () => {
-      if (elements.storesCheckboxList) {
-        elements.storesCheckboxList.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-          cb.checked = DISCOUNTER_STORES.includes(cb.value);
-        });
-      }
-    });
-  }
   if (elements.saveStoresBtn) {
     elements.saveStoresBtn.addEventListener('click', saveActiveStores);
   }
+  if (elements.findNearbyMarketsBtn) {
+    elements.findNearbyMarketsBtn.addEventListener('click', () => loadNearbyMarkets(false));
+  }
+  elements.searchMapAreaBtn?.addEventListener('click', () => loadNearbyMarkets(true));
+  elements.marketChainSelect?.addEventListener('change', () => {
+    state.nearbyMarkets = [];
+    renderNearbyMarkets();
+    loadNearbyMarkets(false);
+  });
 
   // Favoriten-Manager Modal
   if (elements.openFavHubBtn) {
@@ -4018,6 +4458,13 @@ function initEvents() {
   if (elements.clearBasketBtn) {
     elements.clearBasketBtn.addEventListener('click', clearAllBasket);
   }
+  elements.saveBasketTemplateBtn?.addEventListener('click', saveBasketTemplate);
+  elements.loadBasketTemplateBtn?.addEventListener('click', loadBasketTemplate);
+  elements.deleteBasketTemplateBtn?.addEventListener('click', deleteBasketTemplate);
+  elements.extraStoreCostInput?.addEventListener('change', () => {
+    state.extraStoreCost = Math.min(100, Math.max(0, Number(elements.extraStoreCostInput.value) || 0));
+    localStorage.setItem('sparfuchs_extra_store_cost', String(state.extraStoreCost));
+  });
 
   // QR-Code Modal Buttons
   if (elements.closeQrModalBtn) {
@@ -4026,15 +4473,6 @@ function initEvents() {
   if (elements.copyShareLinkBtn) {
     elements.copyShareLinkBtn.addEventListener('click', copyShareLink);
   }
-  if (elements.updateQrHostBtn) {
-    elements.updateQrHostBtn.addEventListener('click', () => {
-      if (elements.qrTargetHostInput && elements.qrTargetHostInput.value.trim()) {
-        localStorage.setItem('sparfuchs_target_host', elements.qrTargetHostInput.value.trim());
-        openQrModal();
-      }
-    });
-  }
-
   // Smartphone Import Modal Buttons
   if (elements.closeImportModalBtn) {
     elements.closeImportModalBtn.addEventListener('click', closeImportModal);
@@ -4058,8 +4496,10 @@ function initEvents() {
 
   // Einkauf abschließen & verbuchen Button
   if (elements.bookBasketBtn) {
-    elements.bookBasketBtn.addEventListener('click', bookCurrentBasket);
+    elements.bookBasketBtn.addEventListener('click', openCheckoutReview);
   }
+  elements.cancelCheckoutReviewBtn?.addEventListener('click', () => elements.checkoutReviewDialog.close());
+  elements.confirmCheckoutReviewBtn?.addEventListener('click', confirmCheckoutReview);
 
   // Historie leeren Button
   if (elements.clearHistoryBtn) {
@@ -4125,6 +4565,12 @@ function initEvents() {
   if (elements.exportCsvBtn) {
     elements.exportCsvBtn.addEventListener('click', exportHistoryAsCsv);
   }
+  elements.exportHistoryJsonBtn?.addEventListener('click', exportHistoryJson);
+  elements.importHistoryJsonBtn?.addEventListener('click', () => elements.importHistoryFileInput?.click());
+  elements.importHistoryFileInput?.addEventListener('change', (event) => {
+    importHistoryJson(event.target.files?.[0]);
+    event.target.value = '';
+  });
 }
 
 /**
@@ -4207,6 +4653,19 @@ function initRecipeToggle() {
   }
 }
 
+function checkForSharedRecipe() {
+  const params = new URLSearchParams(window.location.search);
+  const shared = params.get('url') || params.get('text');
+  if (!shared || !elements.recipeUrlInput) return;
+  elements.recipeUrlInput.value = shared.slice(0, 4000);
+  elements.recipeImportCard?.classList.remove('collapsed');
+  elements.basketDrawer?.classList.add('open');
+  elements.basketDrawer?.setAttribute('aria-hidden', 'false');
+  elements.drawerBackdrop?.classList.add('active');
+  window.history.replaceState({}, document.title, window.location.pathname);
+  parseRecipeFromInput();
+}
+
 // Screen Wake Lock bei Tab-Wechsel reaktivieren (falls im Supermarkt-Modus)
 document.addEventListener('visibilitychange', async () => {
   if (state.storeMode && document.visibilityState === 'visible' && 'wakeLock' in navigator) {
@@ -4234,6 +4693,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (elements.basketBudgetInput && state.budget > 0) {
     elements.basketBudgetInput.value = state.budget;
   }
+  if (elements.extraStoreCostInput) elements.extraStoreCostInput.value = state.extraStoreCost;
 
   initActiveStores();
   initEvents();
@@ -4242,10 +4702,10 @@ document.addEventListener('DOMContentLoaded', () => {
   renderFavoritesBadge();
   renderSearchHistoryChips();
   renderBasket();
+  renderBasketTemplates();
   fetchAndRenderHistory();
   loadCategories();
   fetchOffers();
   checkForIncomingBasketShare();
+  checkForSharedRecipe();
 });
-
-
