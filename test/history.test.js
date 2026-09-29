@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { calculateHouseholdStats } from '../src/engine/history.js';
 
 test('T11.1: calculateHouseholdStats berechnet Kennzahlen für leere Historie sicher', () => {
@@ -8,6 +9,8 @@ test('T11.1: calculateHouseholdStats berechnet Kennzahlen für leere Historie si
   assert.equal(stats.totalSavings, 0);
   assert.equal(stats.receiptCount, 0);
   assert.equal(stats.overallSavingsPercent, 0);
+  assert.equal(stats.projectedAnnualSavings, 0);
+  assert.equal(stats.projectedMonthlySavings, 0);
   assert.deepEqual(stats.storesBreakdown, []);
 });
 
@@ -60,6 +63,8 @@ test('T11.2: calculateHouseholdStats aggregiert Einkäufe, Ersparnisse und Super
   assert.equal(stats.overallSavingsPercent, 33); // 30 / 90 = 33%
   assert.equal(stats.averageSpentPerTrip, 20.00);
   assert.equal(stats.averageSavingsPerTrip, 10.00);
+  assert.equal(stats.projectedAnnualSavings, 520.00); // 10.00 * 52
+  assert.equal(stats.projectedMonthlySavings, 43.33); // 520.00 / 12
 
   // Supermärkte Rangliste (sortiert nach höchster Ersparnis)
   // Lidl: 10€ + 5€ = 15€
@@ -87,6 +92,7 @@ test('T11.3: E2E - POST, GET und DELETE /api/history verbucht Einkaufszettel und
   const app = createApp();
   const server = app.listen(0);
   const port = server.address().port;
+  const device = crypto.randomUUID();
 
   try {
     // 1. POST /api/history: Einen neuen Einkauf buchen
@@ -105,7 +111,7 @@ test('T11.3: E2E - POST, GET und DELETE /api/history verbucht Einkaufszettel und
 
     const postRes = await fetch(`http://127.0.0.1:${port}/api/history`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Sparfuchs-Device': device },
       body: JSON.stringify(newReceipt),
     });
 
@@ -120,7 +126,7 @@ test('T11.3: E2E - POST, GET und DELETE /api/history verbucht Einkaufszettel und
     const bookedId = postData.receipt.id;
 
     // 2. GET /api/history: Abrufen und prüfen
-    const getRes = await fetch(`http://127.0.0.1:${port}/api/history`);
+    const getRes = await fetch(`http://127.0.0.1:${port}/api/history`, { headers: { 'X-Sparfuchs-Device': device } });
     assert.equal(getRes.status, 200);
     const getData = await getRes.json();
     assert.ok(Array.isArray(getData.history));
@@ -128,9 +134,15 @@ test('T11.3: E2E - POST, GET und DELETE /api/history verbucht Einkaufszettel und
     assert.ok(found, 'Der soeben gebuchte Beleg muss in der Historie existieren');
     assert.deepEqual(found.stores, ['Lidl', 'Aldi Nord']);
 
+    const otherDevice = await fetch(`http://127.0.0.1:${port}/api/history`, {
+      headers: { 'X-Sparfuchs-Device': crypto.randomUUID() },
+    });
+    assert.deepEqual((await otherDevice.json()).history, []);
+
     // 3. DELETE /api/history/:id: Den Beleg wieder entfernen
     const delRes = await fetch(`http://127.0.0.1:${port}/api/history/${encodeURIComponent(bookedId)}`, {
       method: 'DELETE',
+      headers: { 'X-Sparfuchs-Device': device },
     });
     assert.equal(delRes.status, 200);
     const delData = await delRes.json();
@@ -147,6 +159,7 @@ test('T11.4: POST /api/history/sync synchronisiert Client-Belege bei Neustart od
   const app = createApp();
   const server = app.listen(0);
   const port = server.address().port;
+  const device = crypto.randomUUID();
 
   try {
     const clientReceipts = [
@@ -164,7 +177,7 @@ test('T11.4: POST /api/history/sync synchronisiert Client-Belege bei Neustart od
 
     const syncRes = await fetch(`http://127.0.0.1:${port}/api/history/sync`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Sparfuchs-Device': device },
       body: JSON.stringify({ clientHistory: clientReceipts }),
     });
 
@@ -172,13 +185,13 @@ test('T11.4: POST /api/history/sync synchronisiert Client-Belege bei Neustart od
     const syncData = await syncRes.json();
     assert.equal(syncData.success, true);
     assert.ok(syncData.history.some(r => r.id === 'offline-receipt-1'));
-    assert.ok(syncData.stats.totalSavings >= 5.0);
+    assert.equal(syncData.stats.totalSavings, 0, 'Ohne belegten Altpreis darf der Sync keine Ersparnis übernehmen');
 
     // Clean up
-    await fetch(`http://127.0.0.1:${port}/api/history/offline-receipt-1`, { method: 'DELETE' });
+    await fetch(`http://127.0.0.1:${port}/api/history/offline-receipt-1`, {
+      method: 'DELETE', headers: { 'X-Sparfuchs-Device': device },
+    });
   } finally {
     server.close();
   }
 });
-
-

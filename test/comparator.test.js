@@ -163,7 +163,7 @@ test('T2.8: filterAndSortOffers reichert Angebote konsistent mit vollständigen 
   const rawOffers = [
     { id: 'p1', title: 'Schokolade', price: 1.49, oldPrice: 1.99 },
     { id: 'p2', title: 'Kaffee', price: 3.99, discountPercent: 20 },
-    { id: 'p3', title: 'Käse', price: 2.00 }, // Kein Streichpreis -> Benchmark-Schätzung
+    { id: 'p3', title: 'Käse', price: 2.00 }, // Kein Streichpreis -> keine behauptete Ersparnis
   ];
 
   const enriched = filterAndSortOffers(rawOffers);
@@ -184,11 +184,11 @@ test('T2.8: filterAndSortOffers reichert Angebote konsistent mit vollständigen 
   assert.ok(p2.savings > 0);
   assert.equal(p2.isEstimatedOldPrice, false);
 
-  // p3: Benchmark-Schätzung
-  assert.equal(p3.oldPrice, 2.50);
-  assert.equal(p3.formattedOldPrice, '2,50 €');
-  assert.equal(p3.savings, 0.50);
-  assert.equal(p3.isEstimatedOldPrice, true);
+  // p3: ohne Beleg keine Ersparnis
+  assert.equal(p3.oldPrice, null);
+  assert.equal(p3.formattedOldPrice, null);
+  assert.equal(p3.savings, null);
+  assert.equal(p3.isEstimatedOldPrice, false);
 });
 
 test('T15.1: isGenuineSupermarket und Whitelist filtern Non-Food-Möbelhäuser und Baumärkte zuverlässig aus', () => {
@@ -304,7 +304,7 @@ test('T15.5: getStandardizedReferencePrice berechnet Grundpreis aus Mengenangabe
   // 1.49 € für 250g = 5.96 € / kg
   assert.equal(std.pricePerBaseUnit, 5.96);
   assert.equal(std.baseUnit, 'kg');
-  assert.equal(std.isEstimated, false);
+  assert.equal(std.isEstimated, true);
 
   // Getränk 1,5 Liter für 0,99 €
   const drinkOffer = {
@@ -316,7 +316,7 @@ test('T15.5: getStandardizedReferencePrice berechnet Grundpreis aus Mengenangabe
   // 0.99 € für 1.5 l = 0.66 € / l
   assert.equal(stdDrink.pricePerBaseUnit, 0.66);
   assert.equal(stdDrink.baseUnit, 'l');
-  assert.equal(stdDrink.isEstimated, false);
+  assert.equal(stdDrink.isEstimated, true);
 });
 
 test('T15.6: Strikte Unterscheidung zwischen REWE und REWE Center', () => {
@@ -386,5 +386,3 @@ test('T15.6: Strikte Unterscheidung zwischen REWE und REWE Center', () => {
   assert.equal(allowedReweCenterResults.length, 1);
   assert.equal(allowedReweCenterResults[0].id, 'rc1');
 });
-
-

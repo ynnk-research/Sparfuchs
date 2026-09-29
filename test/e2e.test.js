@@ -32,7 +32,7 @@ test('T5.1: E2E - Server liefert Frontend-Dateien (HTML, CSS, JS) mit HTTP 200 a
     const resSw = await fetch(`http://127.0.0.1:${port}/sw.js`);
     assert.equal(resSw.status, 200);
     const sw = await resSw.text();
-    assert.match(sw, /sparfuchs-v1/);
+    assert.match(sw, /sparfuchs-v2/);
 
     // 5. Neue UI-Elemente (Markt-Modus, Laufweg, Budget, Export)
     assert.match(html, /id="toggleStoreModeBtn"/);
@@ -45,7 +45,7 @@ test('T5.1: E2E - Server liefert Frontend-Dateien (HTML, CSS, JS) mit HTTP 200 a
   }
 });
 
-test('T5.2: E2E - Live-Suche & Filterung nach Grundpreis', async () => {
+test('T5.2: E2E - Live-Suche & Filterung nach Grundpreis', { skip: !process.env.LIVE_OFFERS_TESTS }, async () => {
   const app = createApp();
   const server = app.listen(0);
   const port = server.address().port;
@@ -79,7 +79,7 @@ test('T5.2: E2E - Live-Suche & Filterung nach Grundpreis', async () => {
   }
 });
 
-test('T5.3: E2E - Multimarkt-Optimierung für einen realen Warenkorb', async () => {
+test('T5.3: E2E - Multimarkt-Optimierung für einen realen Warenkorb', { skip: !process.env.LIVE_OFFERS_TESTS }, async () => {
   const app = createApp();
   const server = app.listen(0);
   const port = server.address().port;

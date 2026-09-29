@@ -59,6 +59,8 @@ test('T3.2: Smart Split teilt Artikel optimal auf 2 Märkte auf und maximiert Er
   assert.equal(result.smartSplit.matchedCount, 3);
   assert.equal(result.smartSplit.totalPrice, 7.37);
   assert.equal(result.splitSavingsVsSingle, 0.60);
+  const withTrip = optimizeBasket(itemQueries, itemResultsMap, { extraStoreCost: 1.00 });
+  assert.equal(withTrip.splitNetSaving, -0.40);
 });
 
 test('T3.3: Missing Items werden korrekt erfasst wenn kein Angebot existiert', () => {

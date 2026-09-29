@@ -22,7 +22,7 @@ test('T4.1: Server liefert vordefinierte Kategorien über /api/categories', asyn
   }
 });
 
-test('T4.2: GET /api/offers liefert Alle-Angebote-Feed bei leerem Suchbegriff', async () => {
+test('T4.2: GET /api/offers liefert Alle-Angebote-Feed bei leerem Suchbegriff', { skip: !process.env.LIVE_OFFERS_TESTS }, async () => {
   const app = createApp();
   const server = app.listen(0);
   const port = server.address().port;
