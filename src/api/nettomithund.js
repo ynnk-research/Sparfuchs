@@ -185,19 +185,24 @@ export async function fetchAllNettoMitHundOffers(fetchFn = fetch, cache = global
   }
 
   try {
+    let failedPages = 0;
     const fetchPromises = NETTO_MIT_HUND_PAGES.map(async url => {
       try {
         const res = await fetchFn(url, { headers: NETTO_HEADERS });
-        if (!res.ok) return [];
+        if (!res.ok) { failedPages++; return []; }
         const html = await res.text();
         return parseNettoMitHundHtml(html, url);
       } catch (err) {
+        failedPages++;
         console.warn(`Fehler beim Laden von Netto mit dem Hund (${url}):`, err.message);
         return [];
       }
     });
 
     const results = await Promise.all(fetchPromises);
+    if (failedPages === NETTO_MIT_HUND_PAGES.length) {
+      throw new Error('Alle Netto-Filialseiten sind nicht erreichbar');
+    }
     const combined = results.flat();
 
     // Deduplizieren nach Titel + Preis
@@ -212,6 +217,8 @@ export async function fetchAllNettoMitHundOffers(fetchFn = fetch, cache = global
       }
     }
 
+    const fetchedAt = new Date().toISOString();
+    uniqueOffers.forEach(offer => { offer.sourceFetchedAt = fetchedAt; });
     if (cache && uniqueOffers.length > 0) {
       // 12 Stunden Cache für konservativen Ansatz
       cache.set(cacheKey, uniqueOffers, 12 * 60 * 60 * 1000);
@@ -220,7 +227,7 @@ export async function fetchAllNettoMitHundOffers(fetchFn = fetch, cache = global
     return uniqueOffers;
   } catch (err) {
     console.error('Fehler bei fetchAllNettoMitHundOffers:', err.message);
-    return [];
+    throw err;
   }
 }
 

@@ -185,8 +185,7 @@ export async function fetchAllAldiNordOffers(fetchFn = fetch, cache = aldiCache)
     });
 
     if (!res.ok) {
-      console.warn(`Aldi Nord Fetch fehlgeschlagen: HTTP ${res.status}`);
-      return [];
+      throw new Error(`Aldi Nord Fetch fehlgeschlagen: HTTP ${res.status}`);
     }
 
     const html = await res.text();
@@ -217,6 +216,8 @@ export async function fetchAllAldiNordOffers(fetchFn = fetch, cache = aldiCache)
       }
     }
 
+    const fetchedAt = new Date().toISOString();
+    offers.forEach(offer => { offer.sourceFetchedAt = fetchedAt; });
     if (cache && offers.length > 0) {
       cache.set(cacheKey, offers);
     }
@@ -224,7 +225,7 @@ export async function fetchAllAldiNordOffers(fetchFn = fetch, cache = aldiCache)
     return offers;
   } catch (err) {
     console.error('Fehler beim Laden der Aldi Nord Angebote:', err.message);
-    return [];
+    throw err;
   }
 }
 

@@ -28,7 +28,7 @@ export async function fetchEdekaMarkets(zipCode = '10115', fetchFn = fetch, cach
   try {
     const url = `https://www.edeka.de/api/marketsearch/markets?searchstring=${encodeURIComponent(cleanZip)}`;
     const res = await fetchFn(url, { headers: EDEKA_HEADERS });
-    if (!res.ok) return [];
+    if (!res.ok) throw new Error(`EDEKA Marktsuche HTTP ${res.status}`);
 
     const data = await res.json();
     const markets = Array.isArray(data.markets) ? data.markets : [];
@@ -41,7 +41,7 @@ export async function fetchEdekaMarkets(zipCode = '10115', fetchFn = fetch, cach
     return markets;
   } catch (err) {
     console.error('Fehler bei EDEKA Marktsuche:', err.message);
-    return [];
+    throw err;
   }
 }
 
@@ -188,7 +188,7 @@ export async function fetchAllEdekaOffers(zipCode = '10115', fetchFn = fetch, ca
   try {
     const url = `https://www.edeka.de/eh/service/eh/offers?marketId=${marketId}`;
     const res = await fetchFn(url, { headers: EDEKA_HEADERS });
-    if (!res.ok) return [];
+    if (!res.ok) throw new Error(`EDEKA Angebote HTTP ${res.status}`);
 
     const data = await res.json();
     const docs = Array.isArray(data.docs) ? data.docs : [];
@@ -196,6 +196,8 @@ export async function fetchAllEdekaOffers(zipCode = '10115', fetchFn = fetch, ca
     const offers = docs
       .map(d => normalizeEdekaDoc(d))
       .filter(Boolean);
+    const fetchedAt = new Date().toISOString();
+    offers.forEach(offer => { offer.sourceFetchedAt = fetchedAt; });
 
     if (cache && offers.length > 0) {
       cache.set(cacheKey, offers, 2 * 60 * 60 * 1000); // 2 Stunden Cache
@@ -204,7 +206,7 @@ export async function fetchAllEdekaOffers(zipCode = '10115', fetchFn = fetch, ca
     return offers;
   } catch (err) {
     console.error('Fehler beim Abrufen der EDEKA-Angebote:', err.message);
-    return [];
+    throw err;
   }
 }
 

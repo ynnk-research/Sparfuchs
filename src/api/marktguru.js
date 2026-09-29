@@ -248,6 +248,8 @@ export async function searchOffers({
   const offers = rawResults
     .map(item => normalizeOffer(item, cleanQuery))
     .filter(Boolean);
+  const fetchedAt = new Date().toISOString();
+  offers.forEach(offer => { offer.sourceFetchedAt = fetchedAt; });
 
   const retailers = Array.isArray(data.filters?.retailers)
     ? data.filters.retailers.map(r => ({ id: r.id, name: r.name, count: r.resultsCount }))

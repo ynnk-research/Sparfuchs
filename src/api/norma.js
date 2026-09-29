@@ -136,7 +136,7 @@ export async function fetchAllNormaOffers(fetchFn = fetch, cache = normaCache) {
     };
 
     const mainRes = await fetchFn('https://www.norma-online.de/de/angebote/', { headers });
-    if (!mainRes.ok) return [];
+    if (!mainRes.ok) throw new Error(`Norma Fetch fehlgeschlagen: HTTP ${mainRes.status}`);
 
     const mainHtml = await mainRes.text();
     const allOffersMap = new Map();
@@ -172,6 +172,8 @@ export async function fetchAllNormaOffers(fetchFn = fetch, cache = normaCache) {
     });
 
     const allOffers = Array.from(allOffersMap.values());
+    const fetchedAt = new Date().toISOString();
+    allOffers.forEach(offer => { offer.sourceFetchedAt = fetchedAt; });
 
     if (cache && allOffers.length > 0) {
       cache.set(cacheKey, allOffers);
@@ -180,7 +182,7 @@ export async function fetchAllNormaOffers(fetchFn = fetch, cache = normaCache) {
     return allOffers;
   } catch (err) {
     console.error('Fehler beim Laden der Norma-Angebote:', err.message);
-    return [];
+    throw err;
   }
 }
 
