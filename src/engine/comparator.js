@@ -413,6 +413,7 @@ export function filterAndSortOffers(offers, options = {}) {
       ? 'retailer' : (standardizedRef.extractedPackage ? 'package' : 'unknown');
     let oldPrice = validateAndSanitizeOldPrice(offer.price, offer.oldPrice, offer.isNonFood);
     let isEstimatedOldPrice = false;
+    let comparisonRetailer = null;
 
     if (oldPrice && oldPrice > offer.price) {
       isEstimatedOldPrice = false;
@@ -425,6 +426,7 @@ export function filterAndSortOffers(offers, options = {}) {
       if (savingsInfo.originalPrice && savingsInfo.originalPrice > offer.price) {
         oldPrice = validateAndSanitizeOldPrice(offer.price, savingsInfo.originalPrice, offer.isNonFood);
         isEstimatedOldPrice = savingsInfo.isEstimated;
+        comparisonRetailer = savingsInfo.comparisonRetailer || null;
       }
     }
 
@@ -452,6 +454,7 @@ export function filterAndSortOffers(offers, options = {}) {
       oldPrice,
       formattedOldPrice,
       isEstimatedOldPrice,
+      comparisonRetailer,
       discountPercent,
       savings,
       savingsFormatted,
@@ -564,44 +567,33 @@ export function calculateItemSavings(item, referenceOffers = []) {
     }
   }
 
-  // 3. Marktpreis-Vergleich NUR bei echter Produktgleichheit
-  // Bereinigt generische Ketten-Präfixe wie "thisisnobrand123", "Lidl Backshop", "Ja!", "Gut & Günstig"
+  // 3. Current price at another retailer. This is a comparison, not a regular price.
   if (Array.isArray(referenceOffers) && referenceOffers.length > 0) {
-    const cleanItemTitle = (item.title || '')
-      .replace(/^(thisisnobrand123|lidl backshop|k-classic|gut & günstig|gut und günstig|ja!|edeka bio|rewe beste wahl|rewe bio|milbona)\s*/i, '')
-      .trim()
-      .toLowerCase();
-
-    // Nur suchen, wenn der bereinigte Name mindestens 4 Zeichen hat und kein Stopwort ist
+    const normalizeTitle = title => String(title || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    const cleanItemTitle = normalizeTitle(item.title);
+    const itemPackage = extractPackageAmountAndUnit(item.packageSize, item.title, item.description);
     if (cleanItemTitle.length >= 4 && !/^(bio|frische|deutsches|speise|feine|echte|unsere)$/i.test(cleanItemTitle)) {
       const matches = referenceOffers.filter(o => {
-        if (o.id === item.id || typeof o.price !== 'number' || o.price <= item.price) return false;
-        const cleanOTitle = (o.title || '')
-          .replace(/^(thisisnobrand123|lidl backshop|k-classic|gut & günstig|gut und günstig|ja!|edeka bio|rewe beste wahl|rewe bio|milbona)\s*/i, '')
-          .trim()
-          .toLowerCase();
-
-        const isMatch = (cleanOTitle.includes(cleanItemTitle) || cleanItemTitle.includes(cleanOTitle)) && cleanOTitle.length >= 4;
-        if (!isMatch) return false;
-
-        // Plausibilität: Vergleichsangebot darf max. 2.2x so teuer sein (keine Packung vs. Kiste)
-        return (o.price / item.price) <= 2.2;
+        if (o.id === item.id || !o.retailer || o.retailer === item.retailer ||
+          typeof o.price !== 'number' || o.price <= item.price || o.price / item.price > 2.2) return false;
+        if (normalizeTitle(o.title) !== cleanItemTitle) return false;
+        const otherPackage = extractPackageAmountAndUnit(o.packageSize, o.title, o.description);
+        if (itemPackage || otherPackage) {
+          if (!itemPackage || !otherPackage || itemPackage.baseUnit !== otherPackage.baseUnit ||
+            Math.abs(itemPackage.baseAmount - otherPackage.baseAmount) > itemPackage.baseAmount * 0.01) return false;
+        }
+        return true;
       });
 
       if (matches.length > 0) {
-        const candidatePrices = matches
-          .map(m => validateAndSanitizeOldPrice(item.price, m.oldPrice, item.isNonFood) || m.price)
-          .filter(p => p > item.price && (p / item.price) <= 2.2);
-
-        if (candidatePrices.length > 0) {
-          const maxMarketPrice = parseFloat(Math.max(...candidatePrices).toFixed(2));
-          return {
-            savings: parseFloat((maxMarketPrice - item.price).toFixed(2)),
-            originalPrice: maxMarketPrice,
-            isEstimated: true,
-            reason: 'Vergleich mit Marktpreis',
-          };
-        }
+        const closestOtherOffer = matches.sort((a, b) => a.price - b.price)[0];
+        return {
+          savings: parseFloat((closestOtherOffer.price - item.price).toFixed(2)),
+          originalPrice: closestOtherOffer.price,
+          isEstimated: true,
+          comparisonRetailer: closestOtherOffer.retailer,
+          reason: 'Aktuelles Angebot einer anderen Kette',
+        };
       }
     }
   }
