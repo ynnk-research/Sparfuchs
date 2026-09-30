@@ -10,18 +10,18 @@ test('T8.1: calculateItemSavings berechnet Ersparnis mit Streichpreis direkt', (
   assert.equal(res.isEstimated, false);
 });
 
-test('T8.2: calculateItemSavings nutzt Marktpreis-Vergleich wenn kein Streichpreis existiert (z. B. bei REWE)', () => {
-  const reweItem = { id: 'rewe-1', title: 'Original Irische Butter', price: 1.79, oldPrice: null };
+test('T8.2: Marktvergleich nutzt nur den aktuellen Preis eines identischen Artikels anderer Kette', () => {
+  const reweItem = { id: 'rewe-1', title: 'Original Irische Butter', retailer: 'REWE', price: 1.79, oldPrice: null };
   const marketOffers = [
-    { id: 'other-1', title: 'Original Irische Butter 250g', price: 2.79, oldPrice: null },
-    { id: 'other-2', title: 'Original Irische Butter', price: 2.99, oldPrice: 3.29 },
+    { id: 'other-1', title: 'Original Irische Butter 250g', retailer: 'Penny', price: 2.79, oldPrice: null },
+    { id: 'other-2', title: 'Original Irische Butter', retailer: 'Kaufland', price: 2.99, oldPrice: 3.29 },
   ];
 
   const res = calculateItemSavings(reweItem, marketOffers);
-  // Vergleicht mit dem höchsten Marktpreis (3.29 €)
-  assert.equal(res.savings, 1.50);
-  assert.equal(res.originalPrice, 3.29);
+  assert.equal(res.savings, 1.20);
+  assert.equal(res.originalPrice, 2.99);
   assert.equal(res.isEstimated, true);
+  assert.equal(res.comparisonRetailer, 'Kaufland');
 });
 
 test('T8.3: calculateBasketTotals berechnet Gesamtsumme, Gesamtersparnis und Prozente für den Einkaufswagen', () => {
@@ -76,4 +76,3 @@ test('T8.5: calculateBasketTotals berechnet Pfand und Stückzahlen korrekt mit G
   // Kassenbetrag inkl. Pfand: 17.53 + 4.10 = 21.63 €
   assert.equal(totals.grandTotalWithDeposit, 21.63);
 });
-
