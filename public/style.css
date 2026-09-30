@@ -5220,3 +5220,51 @@ body.store-mode-active .basket-drawer {
 .checkout-review-row input[type="number"] { width: 100%; background: #17232c; color: #fff; border: 1px solid var(--border-subtle); border-radius: 6px; padding: .35rem; }
 .checkout-review-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1rem; }
 .checkout-review-actions button { border: 1px solid var(--border-subtle); border-radius: 8px; padding: .55rem .8rem; cursor: pointer; }
+
+/* Keep the store picker usable when its map and results exceed the viewport. */
+.stores-modal-card {
+  display: flex;
+  flex-direction: column;
+  max-width: 680px;
+  max-height: min(92dvh, 900px);
+}
+.stores-modal-card .modal-header { flex: 0 0 auto; }
+.stores-modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1rem 1.2rem max(1rem, env(safe-area-inset-bottom));
+}
+.stores-modal-body .btn-stores-save { position: sticky; bottom: 0; z-index: 2; }
+.stores-checkbox-grid { max-height: 180px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.store-checkbox-card { min-height: 44px; }
+.btn-stores-quick, .btn-stores-save, .nearby-market-row button, .selected-market-row button { min-height: 44px; }
+.selected-market-row, .nearby-market-row { flex-wrap: wrap; }
+.selected-market-row span, .nearby-market-row .market-details { min-width: 140px; }
+.price-reference-missing { color: var(--text-muted); font-size: .74rem; font-weight: 500; }
+.market-comparison-price { text-decoration: none; color: #67d9ed; }
+.badge-grundpreis.price-reference-missing { color: var(--text-muted); background: transparent; border-color: var(--border-subtle); }
+
+@media (max-width: 768px) {
+  .header-container { flex-direction: column; align-items: stretch; gap: .35rem; }
+  .brand-group { justify-content: center; }
+  .header-actions { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .4rem; width: 100%; }
+  .header-actions .plz-wrapper { grid-column: 1 / -1; min-height: 44px; justify-content: center; display: flex; }
+  .header-actions > button { min-width: 0; width: 100%; min-height: 44px; padding: .35rem; justify-content: center; }
+  .header-actions .stores-label, .header-actions .fav-label,
+  .header-actions .history-label, .header-actions .qr-header-label,
+  .header-actions .basket-label { display: none; }
+  .header-actions .btn-icon { width: 44px; height: 44px; }
+  .header-actions .plz-wrapper input { width: 70px; font-size: 16px !important; }
+  .modal-backdrop { padding: .4rem; }
+  .stores-modal-card { width: 100%; max-height: 98dvh; }
+  .stores-modal-body { padding: .75rem; }
+  .nearby-controls > * { min-height: 44px; }
+  .nearby-controls #marketChainSelect { flex-basis: 100%; }
+  .nearby-controls #findNearbyMarketsBtn { flex: 1 0 100%; }
+  .market-map { height: 250px; min-height: 250px; }
+  .selected-market-row span { flex-basis: 100%; }
+  .price-row { flex-wrap: wrap; align-items: flex-start; }
+  .price-stack { min-width: 0; }
+  .price-main-line { align-items: flex-start; }
+}

@@ -55,7 +55,7 @@ function escapeHtml(value) {
 
 function safeView(record) {
   const copy = { ...record };
-  for (const key of ['id', 'title', 'brand', 'retailer', 'description', 'packageSize', 'formattedPrice',
+  for (const key of ['id', 'title', 'brand', 'retailer', 'comparisonRetailer', 'description', 'packageSize', 'formattedPrice',
     'formattedOldPrice', 'formattedRefPrice', 'categoryLabel', 'categoryIcon', 'imageUrl']) {
     if (typeof copy[key] === 'string') copy[key] = escapeHtml(copy[key]);
   }
@@ -258,6 +258,9 @@ const elements = {
   storesCountBadge: document.getElementById('storesCountBadge'),
   storesModal: document.getElementById('storesModal'),
   closeStoresModalBtn: document.getElementById('closeStoresModalBtn'),
+  storesCheckboxList: document.getElementById('storesCheckboxList'),
+  selectAllStoresBtn: document.getElementById('selectAllStoresBtn'),
+  selectDiscStoresBtn: document.getElementById('selectDiscStoresBtn'),
   selectedMarketsList: document.getElementById('selectedMarketsList'),
   marketChainSelect: document.getElementById('marketChainSelect'),
   marketSearchZipInput: document.getElementById('marketSearchZipInput'),
@@ -928,10 +931,10 @@ function renderOffers(offers) {
                 <div class="price-main-line">
                   <span class="price-main">${offer.formattedPrice}</span>
                   ${offer.formattedOldPrice ? `
-                    <span class="price-old" title="${offer.isEstimatedOldPrice ? 'Geschätzter Vergleichspreis, keine belegte Ersparnis' : 'Statt-Preis'}">
-                      ${offer.isEstimatedOldPrice ? 'Vergleich ~' : 'statt '}${offer.formattedOldPrice}
+                    <span class="price-old ${offer.isEstimatedOldPrice ? 'market-comparison-price' : ''}" title="${offer.isEstimatedOldPrice ? 'Aktueller Preis bei einer anderen Kette; kein früherer Preis' : 'Statt-Preis aus Angebotsdaten'}">
+                      ${offer.isEstimatedOldPrice ? `${offer.comparisonRetailer || 'Andere Kette'}: ` : 'statt '}${offer.formattedOldPrice}
                     </span>
-                  ` : ''}
+                  ` : '<span class="price-reference-missing">Kein Vergleichspreis verfügbar</span>'}
                 </div>
                 ${offer.savings && offer.savings > 0 ? `
                   <div class="price-savings-sub">
@@ -944,7 +947,7 @@ function renderOffers(offers) {
                 <div class="badge-grundpreis ${isBestRef ? 'highlight' : ''}" title="${offer.referencePriceSource === 'package' ? 'Aus Packungsgröße berechnet' : 'Grundpreis aus Angebotsquelle'}">
                   ${isBestRef ? '🏆 ' : ''}${offer.formattedRefPrice}
                 </div>
-              ` : ''}
+              ` : '<div class="badge-grundpreis price-reference-missing" title="Packungsmenge fehlt">Grundpreis nicht verfügbar</div>'}
             </div>
 
             ${validToStr ? `
@@ -1017,16 +1020,16 @@ function renderOffers(offers) {
             <strong class="table-price-main">${offer.formattedPrice}</strong>
             ${offer.formattedOldPrice ? `
               <div class="table-price-old-line">
-                <span class="table-price-old" title="${offer.isEstimatedOldPrice ? 'Geschätzter Vergleichspreis, keine belegte Ersparnis' : 'Statt-Preis'}">
-                  ${offer.isEstimatedOldPrice ? 'Vergleich ~' : 'statt '}${offer.formattedOldPrice}
+                <span class="table-price-old ${offer.isEstimatedOldPrice ? 'market-comparison-price' : ''}" title="${offer.isEstimatedOldPrice ? 'Aktueller Preis bei einer anderen Kette; kein früherer Preis' : 'Statt-Preis aus Angebotsdaten'}">
+                  ${offer.isEstimatedOldPrice ? `${offer.comparisonRetailer || 'Andere Kette'}: ` : 'statt '}${offer.formattedOldPrice}
                 </span>
                 ${offer.discountPercent ? `<span class="table-price-discount">(-${offer.discountPercent}%)</span>` : ''}
               </div>
-            ` : ''}
+            ` : '<span class="price-reference-missing">Kein Vergleichspreis</span>'}
           </div>
         </td>
         <td class="table-refprice-cell">
-          ${isBestRef ? '🏆 ' : ''}${offer.formattedRefPrice || '—'}${offer.referencePriceSource === 'package' ? ' (berechnet)' : ''}
+          ${isBestRef ? '🏆 ' : ''}${offer.formattedRefPrice || 'Grundpreis nicht verfügbar'}${offer.referencePriceSource === 'package' ? ' (berechnet)' : ''}
         </td>
         <td>
           <div style="display:flex; gap:0.25rem;">
@@ -2966,43 +2969,15 @@ const ALL_SUPERMARKETS = [
 
 const DISCOUNTER_STORES = ['Lidl', 'Aldi Nord', 'Aldi Süd', 'Penny', 'Netto Marken-Discount', 'Netto mit dem Hund', 'Norma'];
 
-const DISCONTINUED_STORES = ['Alnatura', 'Denns BioMarkt', 'tegut...', 'Globus', 'Hit'];
-
 function initActiveStores() {
-  if (Array.isArray(state.selectedMarkets) && state.selectedMarkets.length > 0) {
-    state.activeStores = [...new Set(state.selectedMarkets.map(m => m.chain).filter(Boolean))];
-    localStorage.setItem('sparfuchs_active_stores', JSON.stringify(state.activeStores));
-    updateStoresBadge();
-    renderRetailerChips();
-    return;
-  }
   if (!state.activeStores || !Array.isArray(state.activeStores) || state.activeStores.length === 0) {
-    state.activeStores = [...ALL_SUPERMARKETS];
-    localStorage.setItem('sparfuchs_active_stores', JSON.stringify(state.activeStores));
+    state.activeStores = state.selectedMarkets.length
+      ? [...new Set(state.selectedMarkets.map(m => m.chain).filter(s => ALL_SUPERMARKETS.includes(s)))]
+      : [...ALL_SUPERMARKETS];
   } else {
-    // Bereinigung: Veraltete Märkte ohne API-Angebote entfernen
-    state.activeStores = state.activeStores.filter(s => !DISCONTINUED_STORES.includes(s));
-
-    // Migration: Wenn der Nutzer REWE aktiv hatte, aber REWE Center noch fehlt, automatisch ergänzen
-    if (state.activeStores.includes('REWE') && !state.activeStores.includes('REWE Center')) {
-      const idx = state.activeStores.indexOf('REWE');
-      state.activeStores.splice(idx + 1, 0, 'REWE Center');
-    }
-    if (state.activeStores.includes('Edeka') && !state.activeStores.includes('Edeka Center')) {
-      const idx = state.activeStores.indexOf('Edeka');
-      state.activeStores.splice(idx + 1, 0, 'Edeka Center');
-    }
-    // Migration: Netto mit dem Hund ergänzen falls fehlt
-    if (!state.activeStores.includes('Netto mit dem Hund')) {
-      const idx = state.activeStores.indexOf('Netto Marken-Discount');
-      if (idx !== -1) {
-        state.activeStores.splice(idx + 1, 0, 'Netto mit dem Hund');
-      } else {
-        state.activeStores.push('Netto mit dem Hund');
-      }
-    }
-    localStorage.setItem('sparfuchs_active_stores', JSON.stringify(state.activeStores));
+    state.activeStores = [...new Set(state.activeStores.filter(s => ALL_SUPERMARKETS.includes(s)))];
   }
+  localStorage.setItem('sparfuchs_active_stores', JSON.stringify(state.activeStores));
   updateStoresBadge();
   renderRetailerChips();
 }
@@ -3071,7 +3046,9 @@ function renderRetailerChips() {
 
 function openStoresModal() {
   if (!elements.storesModal) return;
+  activeStoresDraft = new Set(state.activeStores);
   marketSelectionDraft = new Map(state.selectedMarkets.map(market => [market.chain, market]));
+  renderStoreCheckboxes();
   elements.marketChainSelect.replaceChildren();
   for (const chain of ALL_SUPERMARKETS) {
     const option = document.createElement('option');
@@ -3094,7 +3071,37 @@ function openStoresModal() {
 let marketMap = null;
 let marketMarkers = null;
 let marketSelectionDraft = new Map();
+let activeStoresDraft = new Set();
 let marketSearchRequestId = 0;
+
+function renderStoreCheckboxes() {
+  const container = elements.storesCheckboxList;
+  if (!container) return;
+  container.replaceChildren();
+  for (const chain of ALL_SUPERMARKETS) {
+    const label = document.createElement('label');
+    label.className = 'store-checkbox-card';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = chain;
+    checkbox.checked = activeStoresDraft.has(chain);
+    label.classList.toggle('active', checkbox.checked);
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) activeStoresDraft.add(chain);
+      else {
+        activeStoresDraft.delete(chain);
+        marketSelectionDraft.delete(chain);
+      }
+      label.classList.toggle('active', checkbox.checked);
+      renderSelectedMarketDraft();
+      renderNearbyMarkets();
+    });
+    const name = document.createElement('span');
+    name.textContent = chain;
+    label.append(checkbox, name);
+    container.append(label);
+  }
+}
 
 function ensureMarketMap() {
   if (marketMap || !window.L || !elements.marketMap) return;
@@ -3142,6 +3149,8 @@ function renderSelectedMarketDraft() {
 
 function selectMarketForChain(market) {
   marketSelectionDraft.set(market.chain, market);
+  activeStoresDraft.add(market.chain);
+  renderStoreCheckboxes();
   renderSelectedMarketDraft();
   renderNearbyMarkets();
   elements.nearbyMarketsStatus.textContent = `${market.name} für ${market.chain} vorgemerkt. Mit „Auswahl speichern“ übernehmen.`;
@@ -3239,12 +3248,12 @@ function closeStoresModal() {
 }
 
 function saveActiveStores() {
-  if (!marketSelectionDraft.size) {
-    showToast('⚠️ Bitte wähle mindestens eine Filiale auf der Karte aus.');
+  if (!activeStoresDraft.size) {
+    showToast('⚠️ Bitte aktiviere mindestens eine Supermarktkette.');
     return;
   }
-  state.selectedMarkets = [...marketSelectionDraft.values()];
-  state.activeStores = [...marketSelectionDraft.keys()];
+  state.activeStores = [...activeStoresDraft];
+  state.selectedMarkets = [...marketSelectionDraft.values()].filter(m => activeStoresDraft.has(m.chain));
   const zip = elements.marketSearchZipInput.value.trim();
   if (/^\d{5}$/.test(zip)) {
     state.zip = zip;
@@ -3257,7 +3266,7 @@ function saveActiveStores() {
   updateStoresBadge();
   renderRetailerChips();
   closeStoresModal();
-  showToast(`✅ ${state.selectedMarkets.length} Filialen gespeichert`);
+  showToast(`✅ ${state.activeStores.length} Ketten aktiv, ${state.selectedMarkets.length} Filialen gespeichert`);
   fetchOffers();
 }
 
@@ -4365,6 +4374,19 @@ function initEvents() {
   if (elements.closeStoresModalBtn) {
     elements.closeStoresModalBtn.addEventListener('click', closeStoresModal);
   }
+  elements.selectAllStoresBtn?.addEventListener('click', () => {
+    activeStoresDraft = new Set(ALL_SUPERMARKETS);
+    renderStoreCheckboxes();
+  });
+  elements.selectDiscStoresBtn?.addEventListener('click', () => {
+    activeStoresDraft = new Set(DISCOUNTER_STORES);
+    for (const chain of marketSelectionDraft.keys()) {
+      if (!activeStoresDraft.has(chain)) marketSelectionDraft.delete(chain);
+    }
+    renderStoreCheckboxes();
+    renderSelectedMarketDraft();
+    renderNearbyMarkets();
+  });
   if (elements.saveStoresBtn) {
     elements.saveStoresBtn.addEventListener('click', saveActiveStores);
   }

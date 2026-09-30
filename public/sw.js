@@ -4,7 +4,7 @@
  * im Funkloch des Supermarkts (Kühlregal, Keller, Stahlbetonbau) blitzschnell funktionieren.
  */
 
-const CACHE_NAME = 'sparfuchs-v2.5';
+const CACHE_NAME = 'sparfuchs-v2.6';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
