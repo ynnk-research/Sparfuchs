@@ -1,5 +1,10 @@
 import { globalPersistentCache } from './cache.js';
 
+const OVERPASS_ENDPOINTS = [
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
+];
+
 const CHAIN_PATTERNS = [
   [/\brewe\s*center\b/i, 'REWE Center'],
   [/\brewe\b/i, 'REWE'],
@@ -81,7 +86,7 @@ export async function searchNearbyMarkets({ zipCode, radiusKm = 5, chain = '', l
   }
   const requestedChain = String(chain || '').trim();
   if (requestedChain.length > 80) throw new Error('Ungültige Marktkette');
-  const cacheKey = `nearby_markets_osm_v2_${zip}_${radius}_${requestedChain}_${centerProvided ? `${center.lat.toFixed(3)}_${center.lon.toFixed(3)}` : 'plz'}`;
+  const cacheKey = `nearby_markets_osm_v4_${zip}_${radius}_${requestedChain}_${centerProvided ? `${center.lat.toFixed(3)}_${center.lon.toFixed(3)}` : 'plz'}`;
   const cached = cache?.get(cacheKey);
   if (cached) return cached;
 
@@ -95,15 +100,25 @@ export async function searchNearbyMarkets({ zipCode, radiusKm = 5, chain = '', l
     if (!Number.isFinite(origin.lat) || !Number.isFinite(origin.lon)) throw new Error('PLZ hat keine Koordinaten');
   }
 
-  const query = `[out:json][timeout:15];nwr["shop"~"^(supermarket|discount)$"](around:${Math.round(radius * 1000)},${origin.lat},${origin.lon});out center tags;`;
-  const osmResponse = await fetchFn('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'SparFuchs/1.0 nearby-markets' },
-    body: new URLSearchParams({ data: query }),
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!osmResponse.ok) throw new Error('Marktsuche ist gerade nicht verfügbar');
-  const osm = await osmResponse.json();
+  const query = `[out:json][timeout:12];nwr["shop"~"^(supermarket|discount)$"](around:${Math.round(radius * 1000)},${origin.lat},${origin.lon});out center tags;`;
+  let osm = null;
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const response = await fetchFn(`${endpoint}?data=${encodeURIComponent(query)}`, {
+        headers: { 'User-Agent': 'SparFuchs/1.0 nearby-markets' },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) continue;
+      const data = await response.json();
+      if (Array.isArray(data.elements)) {
+        osm = data;
+        break;
+      }
+    } catch {
+      // Public instances can be unavailable; try the next one.
+    }
+  }
+  if (!osm) throw new Error('Kartendienst ist gerade nicht erreichbar. Bitte später erneut versuchen.');
   const markets = (Array.isArray(osm.elements) ? osm.elements : [])
     .map(element => normalizeOsmMarket(element, origin))
     .filter(Boolean)
