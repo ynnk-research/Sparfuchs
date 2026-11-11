@@ -106,6 +106,7 @@ const state = {
   minDiscount: 0,
   activeStores: readStoredJson('sparfuchs_active_stores', []),
   selectedMarkets: readStoredJson('sparfuchs_selected_markets', []).filter(m => m && typeof m === 'object' && typeof m.chain === 'string'),
+  selgrosMarket: localStorage.getItem('sparfuchs_selgros_market') || '',
   nearbyMarkets: [],
   tableSort: { key: 'refPrice', dir: 'asc' },
   dealSwapTargetItem: null,
@@ -259,6 +260,8 @@ const elements = {
   storesModal: document.getElementById('storesModal'),
   closeStoresModalBtn: document.getElementById('closeStoresModalBtn'),
   storesCheckboxList: document.getElementById('storesCheckboxList'),
+  selgrosMarketSelect: document.getElementById('selgrosMarketSelect'),
+  selgrosMarketStatus: document.getElementById('selgrosMarketStatus'),
   selectAllStoresBtn: document.getElementById('selectAllStoresBtn'),
   selectDiscStoresBtn: document.getElementById('selectDiscStoresBtn'),
   selectedMarketsList: document.getElementById('selectedMarketsList'),
@@ -800,6 +803,7 @@ async function fetchOffers() {
     if (Array.isArray(state.activeStores) && state.activeStores.length > 0) {
       params.append('activeRetailers', state.activeStores.join(','));
     }
+    if (state.selgrosMarket && state.activeStores.includes('Selgros')) params.append('selgrosMarket', state.selgrosMarket);
 
     const response = await fetch(`/api/offers?${params.toString()}`, { signal: offersAbortController.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -2975,7 +2979,7 @@ function initActiveStores() {
       ? [...new Set(state.selectedMarkets.map(m => m.chain).filter(s => ALL_SUPERMARKETS.includes(s)))]
       : [...ALL_SUPERMARKETS];
   } else {
-    state.activeStores = [...new Set(state.activeStores.filter(s => ALL_SUPERMARKETS.includes(s)))];
+    state.activeStores = [...new Set(state.activeStores.filter(s => ALL_SUPERMARKETS.includes(s) || (s === 'Selgros' && state.selgrosMarket)))];
   }
   localStorage.setItem('sparfuchs_active_stores', JSON.stringify(state.activeStores));
   updateStoresBadge();
@@ -3049,6 +3053,7 @@ function openStoresModal() {
   activeStoresDraft = new Set(state.activeStores);
   marketSelectionDraft = new Map(state.selectedMarkets.map(market => [market.chain, market]));
   renderStoreCheckboxes();
+  loadSelgrosMarkets();
   elements.marketChainSelect.replaceChildren();
   for (const chain of ALL_SUPERMARKETS) {
     const option = document.createElement('option');
@@ -3073,6 +3078,26 @@ let marketMarkers = null;
 let marketSelectionDraft = new Map();
 let activeStoresDraft = new Set();
 let marketSearchRequestId = 0;
+
+async function loadSelgrosMarkets() {
+  const select = elements.selgrosMarketSelect;
+  const status = elements.selgrosMarketStatus;
+  select.disabled = true;
+  status.textContent = 'Selgros-Märkte werden geladen …';
+  try {
+    const response = await fetch('/api/selgros/markets');
+    if (!response.ok) throw new Error('Marktliste nicht erreichbar');
+    const markets = await response.json();
+    select.replaceChildren(new Option('Nicht aktiviert', ''));
+    for (const market of markets) select.add(new Option(market.name, market.id));
+    select.value = state.selgrosMarket;
+    if (state.selgrosMarket && !select.value) status.textContent = 'Der gespeicherte Selgros-Markt ist nicht mehr verfügbar. Bitte neu auswählen.';
+    else status.textContent = '';
+    select.disabled = false;
+  } catch {
+    status.textContent = 'Selgros-Marktliste derzeit nicht erreichbar. Bitte später erneut versuchen.';
+  }
+}
 
 function renderStoreCheckboxes() {
   const container = elements.storesCheckboxList;
@@ -3248,11 +3273,18 @@ function closeStoresModal() {
 }
 
 function saveActiveStores() {
+  if (!elements.selgrosMarketSelect.disabled) {
+    const selgrosMarket = elements.selgrosMarketSelect.value;
+    if (selgrosMarket) activeStoresDraft.add('Selgros');
+    else activeStoresDraft.delete('Selgros');
+  }
   if (!activeStoresDraft.size) {
     showToast('⚠️ Bitte aktiviere mindestens eine Supermarktkette.');
     return;
   }
   state.activeStores = [...activeStoresDraft];
+  if (!elements.selgrosMarketSelect.disabled) state.selgrosMarket = elements.selgrosMarketSelect.value;
+  localStorage.setItem('sparfuchs_selgros_market', state.selgrosMarket);
   state.selectedMarkets = [...marketSelectionDraft.values()].filter(m => activeStoresDraft.has(m.chain));
   const zip = elements.marketSearchZipInput.value.trim();
   if (/^\d{5}$/.test(zip)) {
@@ -4380,6 +4412,7 @@ function initEvents() {
   });
   elements.selectDiscStoresBtn?.addEventListener('click', () => {
     activeStoresDraft = new Set(DISCOUNTER_STORES);
+    if (!elements.selgrosMarketSelect.disabled) elements.selgrosMarketSelect.value = '';
     for (const chain of marketSelectionDraft.keys()) {
       if (!activeStoresDraft.has(chain)) marketSelectionDraft.delete(chain);
     }
