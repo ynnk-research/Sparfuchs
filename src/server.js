@@ -13,6 +13,7 @@ import { searchNormaOffers } from './api/norma.js';
 import { searchEdekaOffers } from './api/edeka.js';
 import { searchNettoMitHundOffers } from './api/nettomithund.js';
 import { searchNearbyMarkets } from './api/markets.js';
+import { fetchSelgrosMarkets, searchSelgrosOffers } from './api/selgros.js';
 import { filterAndSortOffers, calculateBasketTotals, isMatchingRetailer } from './engine/comparator.js';
 import { optimizeBasket, sanitizeItemForSearch } from './engine/optimizer.js';
 import { loadHistoryFromFile, saveHistoryToFile, calculateHouseholdStats, reconcileReceipt } from './engine/history.js';
@@ -96,6 +97,11 @@ export function createApp() {
   app.use(express.static(path.join(__dirname, '../public')));
   app.use('/vendor/leaflet', express.static(path.join(__dirname, '../node_modules/leaflet/dist')));
 
+  app.get('/api/selgros/markets', async (_req, res) => {
+    try { res.json(await fetchSelgrosMarkets()); }
+    catch { res.status(503).json({ error: 'Selgros-Marktliste derzeit nicht erreichbar' }); }
+  });
+
   // A random browser token keeps receipts separate without requiring an account.
   // The token is never used as a file name directly.
   app.use('/api/history', (req, res, next) => {
@@ -126,6 +132,7 @@ export function createApp() {
         favs = '',
         minDiscount = '',
         activeRetailers = '',
+        selgrosMarket = '',
         limit = '60',
       } = req.query;
       if (!/^\d{5}$/.test(String(zip))) {
@@ -158,7 +165,7 @@ export function createApp() {
       const retailerMap = new Map();
       const seenIds = new Set();
       const sourceReports = new Map();
-      const sourceScope = { Marktguru: 'PLZ', EDEKA: 'Filiale nahe PLZ', 'Aldi Nord': 'Kettenfeed', Norma: 'Kettenfeed', 'Netto mit dem Hund': 'Kettenfeed' };
+      const sourceScope = { Marktguru: 'PLZ', EDEKA: 'Filiale nahe PLZ', 'Aldi Nord': 'Kettenfeed', Norma: 'Kettenfeed', 'Netto mit dem Hund': 'Kettenfeed', Selgros: 'gewählte Filiale, Brutto' };
       const sourceError = (source) => {
         const previous = sourceReports.get(source);
         sourceReports.set(source, { source, scope: sourceScope[source],
@@ -185,6 +192,12 @@ export function createApp() {
           }
         }
       };
+
+      const selgrosTask = selgrosMarket && activeStoreList.some(r => r.toLowerCase() === 'selgros') && shouldIncludeStore('Selgros')
+        ? searchSelgrosOffers({ query: searchQuery, marketId: selgrosMarket })
+          .then(offers => addOffers(offers, 'Selgros'))
+          .catch(err => { sourceError('Selgros'); console.warn('Selgros Feed Fehler:', err.message); })
+        : Promise.resolve();
 
       if (!searchQuery) {
         // LEER-SUCHE / ALLE ANGEBOTE:
@@ -323,6 +336,8 @@ export function createApp() {
 
         await Promise.all(fetchTasks);
       }
+
+      await selgrosTask;
 
       const combinedRetailers = Array.from(retailerMap.entries()).map(([name, count]) => ({
         id: name,

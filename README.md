@@ -17,12 +17,25 @@ Ein modernes, hocheffizientes Open-Source-Tool für preisbewusstes Einkaufen in 
 - **Direktanbindungen:**
   - **Aldi Nord:** Eigener Algolia-Search-Crawler mit über 200+ frischen Wochenartikeln.
   - **Norma:** Automatischer Web-Parser mit über 380+ Angeboten inklusive Aktionsware.
-- **Angebotsquellen:** Marktguru und EDEKA liefern Angebotsdaten; weitere Kettenfeeds ergänzen die Suche. Die konkrete Filialsuche nutzt OpenStreetMap.
-- **Echte Filialen wählen:** Im Markt-Dialog eine Kette wählen, bei einer PLZ oder im sichtbaren Kartenausschnitt suchen und einen Marker anklicken. Pro Kette wird genau eine Filiale gespeichert; ein Link öffnet ihren Standort in Google Maps. Die Angebotsdaten bleiben Kettendaten und bestätigen nicht die Verfügbarkeit in genau dieser Filiale.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:5b84dd7908584ea843c4047404f668d81c5f19a73ce0be2ae9fdf2f8ab5e266f -->
+
+- **Angebotsquellen:** Marktguru, EDEKA und Selgros liefern Angebotsdaten; weitere Kettenfeeds ergänzen die Suche.
+- **Echte Filialen wählen:** Im Markt-Dialog eine Kette wählen und eine Filiale über die OpenStreetMap-Karte speichern. Die meisten Angebotsquellen liefern Kettendaten und bestätigen nicht die Verfügbarkeit in der gewählten Filiale.
+- **Selgros:** Im Markt-Dialog einen Selgros-Markt auswählen. Die Suche zeigt gültige Aktionspreise dieser Filiale brutto je Verkaufseinheit; für den Einkauf gelten die Voraussetzungen von Selgros. Pro Abfrage werden bis zu 100 Treffer abgerufen. Der Einkaufsoptimierer berücksichtigt Selgros noch nicht, da die Gebindegrößen nicht immer eindeutig vergleichbar sind. METRO ist über einen externen Link erreichbar.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 ### 3. 🛡️ Strikte Supermarkt-Prüfung & Meine Märkte Manager (v2.0)
 - **Echte Supermärkte only:** Verhindert das Auftauchen von Möbelhäusern oder Baumärkten (XXXLutz, POCO, OBI etc.) in Suchergebnissen.
-- **Aktive Märkte steuern:** Im Dialog **„🏪 Meine Supermärkte“** wählst du auf einer Karte eine konkrete Filiale je gewünschter Kette. Nur Angebote dieser Ketten erscheinen danach in Suche und Optimierer.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:b4ea68e8f5afcc9babc983dd0ed86680ddbbf5d78212818776ad59bd6cc1072a -->
+
+- **Aktive Märkte steuern:** Im Dialog **„🏪 Meine Supermärkte“** wählst du die Ketten und optional Filialen. Nur Angebote aktiver Ketten erscheinen in der Suche; für Selgros wählst du einen Markt aus der separaten Liste.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 ### 4. 💡 Deal-Swap: Günstigere Alternative vergleichen & 1-Klick tauschen (v2.0)
 - **Automatischer Preisvergleich im Warenkorb:** Sobald du ein Produkt auf die Liste setzt, prüft SparFuchs, ob dasselbe oder ein vergleichbares Produkt bei einem deiner anderen aktiven Supermärkte günstiger ist.

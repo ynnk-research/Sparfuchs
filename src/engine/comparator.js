@@ -149,7 +149,7 @@ export function getStandardizedReferencePrice(offer) {
 
   // 2. Fallback: Versuch, Packungsgröße aus packageSize, title oder description zu extrahieren
   const offerPrice = typeof offer.price === 'number' ? offer.price : parseFloat(offer.price);
-  if (typeof offerPrice === 'number' && offerPrice > 0) {
+  if (!offer.disableEstimatedReferencePrice && typeof offerPrice === 'number' && offerPrice > 0) {
     const pkg = extractPackageAmountAndUnit(offer.packageSize, offer.title, offer.description);
     if (pkg && pkg.baseAmount > 0) {
       const calcRef = parseFloat((offerPrice / pkg.baseAmount).toFixed(2));
@@ -202,7 +202,7 @@ export function isOfferCurrentlyValid(offer, referenceDate = new Date()) {
  */
 export const SUPERMARKET_WHITELIST = [
   'aldi', 'lidl', 'rewe', 'rewe center', 'edeka', 'kaufland', 'penny', 'netto',
-  'marktkauf', 'norma', 'tegut', 'globus', 'hit', 'konsum',
+  'marktkauf', 'norma', 'tegut', 'globus', 'hit', 'konsum', 'selgros',
   'feneberg', 'famila', 'combi', 'wasgau', 'v-markt', 'bünting',
   'dm', 'rossmann', 'müller', 'budni',
   'alnatura', 'denns', 'bio company',
@@ -568,13 +568,13 @@ export function calculateItemSavings(item, referenceOffers = []) {
   }
 
   // 3. Current price at another retailer. This is a comparison, not a regular price.
-  if (Array.isArray(referenceOffers) && referenceOffers.length > 0) {
+  if (!item.disableEstimatedReferencePrice && Array.isArray(referenceOffers) && referenceOffers.length > 0) {
     const normalizeTitle = title => String(title || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
     const cleanItemTitle = normalizeTitle(item.title);
     const itemPackage = extractPackageAmountAndUnit(item.packageSize, item.title, item.description);
     if (cleanItemTitle.length >= 4 && !/^(bio|frische|deutsches|speise|feine|echte|unsere)$/i.test(cleanItemTitle)) {
       const matches = referenceOffers.filter(o => {
-        if (o.id === item.id || !o.retailer || o.retailer === item.retailer ||
+        if (o.disableEstimatedReferencePrice || o.id === item.id || !o.retailer || o.retailer === item.retailer ||
           typeof o.price !== 'number' || o.price <= item.price || o.price / item.price > 2.2) return false;
         if (normalizeTitle(o.title) !== cleanItemTitle) return false;
         const otherPackage = extractPackageAmountAndUnit(o.packageSize, o.title, o.description);

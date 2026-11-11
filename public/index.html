@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="style.css?v=2.6">
+  <link rel="stylesheet" href="style.css?v=2.8">
 </head>
 <body class="dark-theme">
   <!-- Top Navigation -->
@@ -744,11 +744,15 @@
         <div id="storesCheckboxList" class="stores-checkbox-grid" aria-label="Aktive Supermarktketten"></div>
         <section class="wholesale-offers" aria-labelledby="wholesaleOffersTitle">
           <h4 id="wholesaleOffersTitle">Großhandelsangebote</h4>
-          <p>Die Angebote von Großhändlern kannst du direkt beim Anbieter ansehen. Sie erscheinen derzeit nicht im Preisvergleich. Bitte prüfe dort Preise, Verfügbarkeit und Einkaufsvoraussetzungen.</p>
+          <p>Wähle einen Selgros-Markt, um dessen Angebote zu sehen. Preise sind brutto und gelten für die angegebene Verkaufseinheit. Selgros-Angebote werden noch nicht im Einkaufsoptimierer berücksichtigt. Für den Einkauf gelten die Voraussetzungen des Großhändlers.</p>
+          <label for="selgrosMarketSelect">Selgros-Markt</label>
+          <select id="selgrosMarketSelect" aria-describedby="selgrosMarketStatus"><option value="">Nicht aktiviert</option></select>
+          <p id="selgrosMarketStatus" role="status"></p>
           <div class="wholesale-offers-links">
             <a href="https://www.metro.de/angebote" target="_blank" rel="noopener noreferrer">METRO Angebote ↗</a>
             <a href="https://www.selgros.de/angebote" target="_blank" rel="noopener noreferrer">Selgros Angebote ↗</a>
           </div>
+          <p>METRO-Angebote sind nur über den Link verfügbar.</p>
         </section>
         <div id="selectedMarketsList" class="selected-markets-list" aria-label="Gewählte Filialen"></div>
         <div class="nearby-markets-box">
@@ -842,6 +846,6 @@
     </div>
   </dialog>
   <script src="/vendor/leaflet/leaflet.js"></script>
-  <script src="app.js?v=2.6"></script>
+  <script src="app.js?v=2.8"></script>
 </body>
 </html>
